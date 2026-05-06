@@ -1,4 +1,4 @@
-﻿@inherits LayoutComponentBase
+@inherits LayoutComponentBase
 
 <div class="page">
     <div class="sidebar">
@@ -6,18 +6,54 @@
     </div>
 
     <main>
-        <div class="top-row px-4">
-            <a href="https://learn.microsoft.com/aspnet/core/" target="_blank">About</a>
+        <div class="top-row">
+            
+            <span></span>
+
+            <AuthorizeView>
+                <Authorized>
+                    <div style="display:flex;align-items:center;gap:12px;margin-left:auto;">
+
+                        <AuthorizeView Roles="admin">
+                            <Authorized Context="_">
+                                <span style="font-size:11px;font-weight:600;background:#eff6ff;color:#1d4ed8;padding:3px 8px;border-radius:20px;">
+                                    Администратор
+                                </span>
+                            </Authorized>
+                            <NotAuthorized Context="_">
+                                <span style="font-size:11px;font-weight:600;background:#f0fdf4;color:#166534;padding:3px 8px;border-radius:20px;">
+                                    Технолог
+                                </span>
+                            </NotAuthorized>
+                        </AuthorizeView>
+
+                        <span style="font-size:13px;color:#374151;font-weight:500;">
+                            <i class="fa-regular fa-user" style="color:#94a3b8;margin-right:5px;"></i>
+                            @(context.User.Claims.FirstOrDefault(c => c.Type == "FullName")?.Value
+                              ?? context.User.Identity?.Name)
+                        </span>
+
+                        <a href="/logout"
+                           style="font-size:13px;color:#64748b;text-decoration:none;display:flex;align-items:center;gap:5px;padding:5px 10px;border:1px solid #e2e8f0;border-radius:6px;transition:all .15s;"
+                           onmouseover="this.style.borderColor='#fca5a5';this.style.color='#dc2626'"
+                           onmouseout="this.style.borderColor='#e2e8f0';this.style.color='#64748b'">
+                            <i class="fa-solid fa-right-from-bracket"></i>
+                            Выход
+                        </a>
+                    </div>
+                </Authorized>
+            </AuthorizeView>
         </div>
 
-        <article class="content px-4">
+        <article class="content">
             @Body
         </article>
     </main>
 </div>
 
 <div id="blazor-error-ui" data-nosnippet>
-    An unhandled error has occurred.
-    <a href="." class="reload">Reload</a>
-    <span class="dismiss">🗙</span>
+    <i class="fa-solid fa-triangle-exclamation" style="color:#ca8a04;"></i>
+    Произошла ошибка в приложении.
+    <a href="." class="reload">Перезагрузить страницу</a>
+    <span class="dismiss">✕</span>
 </div>

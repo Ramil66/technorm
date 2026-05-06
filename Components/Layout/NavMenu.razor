@@ -1,30 +1,149 @@
-﻿<div class="top-row ps-3 navbar navbar-dark">
-    <div class="container-fluid">
-        <a class="navbar-brand" href="">TechNormBlazor</a>
+<style>
+    .tn-nav-brand {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        padding: 16px 16px 12px;
+        border-bottom: 1px solid rgba(255,255,255,.08);
+        margin-bottom: 8px;
+        text-decoration: none;
+    }
+    .tn-nav-brand-icon {
+        width: 32px; height: 32px;
+        background: #2563eb;
+        border-radius: 8px;
+        display: flex; align-items: center; justify-content: center;
+        flex-shrink: 0;
+    }
+    .tn-nav-brand-text {
+        font-size: 15px;
+        font-weight: 700;
+        color: #fff;
+        letter-spacing: -.2px;
+    }
+    .tn-nav-brand-sub {
+        font-size: 11px;
+        color: rgba(255,255,255,.40);
+        line-height: 1.2;
+    }
+
+    .tn-nav-section {
+        padding: 12px 12px 4px;
+        font-size: 10px;
+        font-weight: 700;
+        text-transform: uppercase;
+        letter-spacing: .08em;
+        color: rgba(255,255,255,.30);
+    }
+
+    .tn-nav-link {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        padding: 9px 16px;
+        margin: 1px 8px;
+        border-radius: 7px;
+        color: rgba(255,255,255,.70);
+        text-decoration: none;
+        font-size: 13.5px;
+        font-weight: 500;
+        transition: background .12s, color .12s;
+    }
+    .tn-nav-link:hover {
+        background: rgba(255,255,255,.08);
+        color: #fff;
+        text-decoration: none;
+    }
+    .tn-nav-link.active {
+        background: rgba(37,99,235,.35);
+        color: #fff;
+    }
+    .tn-nav-link i {
+        width: 16px;
+        text-align: center;
+        font-size: 13px;
+        flex-shrink: 0;
+    }
+
+    /* Адаптивный тоггл */
+    .tn-nav-toggle {
+        display: none;
+    }
+    @@media (max-width: 768px) {
+        .tn-nav-toggle { display: block; padding: 8px 16px; }
+        .tn-nav-links   { display: none; }
+        .tn-nav-links.open { display: block; }
+    }
+</style>
+
+<a href="/" class="tn-nav-brand">
+    <div class="tn-nav-brand-icon">
+        <i class="fa-solid fa-gears" style="color:#fff;font-size:14px;"></i>
     </div>
+    <div>
+        <div class="tn-nav-brand-text">ТехНорм</div>
+        <div class="tn-nav-brand-sub">НСИ производства</div>
+    </div>
+</a>
+
+<div class="tn-nav-links" id="tn-nav-links">
+
+    <div class="tn-nav-section">Главное</div>
+
+    <NavLink class="tn-nav-link" href="/" Match="NavLinkMatch.All">
+        <i class="fa-solid fa-house"></i>
+        Главная
+    </NavLink>
+
+    <div class="tn-nav-section">Справочники</div>
+
+    <NavLink class="tn-nav-link" href="/products">
+        <i class="fa-solid fa-box"></i>
+        Изделия
+    </NavLink>
+
+    <NavLink class="tn-nav-link" href="/operations">
+        <i class="fa-solid fa-list-check"></i>
+        Операции
+    </NavLink>
+
+    <NavLink class="tn-nav-link" href="/resources">
+        <i class="fa-solid fa-screwdriver-wrench"></i>
+        Ресурсы
+    </NavLink>
+
+    <NavLink class="tn-nav-link" href="/materials">
+        <i class="fa-solid fa-cubes"></i>
+        Материалы
+    </NavLink>
+
+    <div class="tn-nav-section">НСИ</div>
+
+    <NavLink class="tn-nav-link" href="/routes">
+        <i class="fa-solid fa-route"></i>
+        Маршрутные карты
+    </NavLink>
+
+    <NavLink class="tn-nav-link" href="/time-norms">
+        <i class="fa-solid fa-clock"></i>
+        Нормы времени
+    </NavLink>
+
+    <NavLink class="tn-nav-link" href="/material-norms">
+        <i class="fa-solid fa-scale-balanced"></i>
+        Нормы расхода
+    </NavLink>
+
+    <div class="tn-nav-section">Загрузка событий</div>
+
+    <NavLink class="tn-nav-link" href="/events">
+        <i class="fa-solid fa-bolt"></i>
+        Журнал событий
+    </NavLink>
+
+    <NavLink class="tn-nav-link" href="/documents">
+        <i class="fa-solid fa-file-arrow-up"></i>
+        Документы
+    </NavLink>
+
 </div>
-
-<input type="checkbox" title="Navigation menu" class="navbar-toggler" />
-
-<div class="nav-scrollable" onclick="document.querySelector('.navbar-toggler').click()">
-    <nav class="nav flex-column">
-        <div class="nav-item px-3">
-            <NavLink class="nav-link" href="" Match="NavLinkMatch.All">
-                <span class="bi bi-house-door-fill-nav-menu" aria-hidden="true"></span> Home
-            </NavLink>
-        </div>
-
-        <div class="nav-item px-3">
-            <NavLink class="nav-link" href="counter">
-                <span class="bi bi-plus-square-fill-nav-menu" aria-hidden="true"></span> Counter
-            </NavLink>
-        </div>
-
-        <div class="nav-item px-3">
-            <NavLink class="nav-link" href="weather">
-                <span class="bi bi-list-nested-nav-menu" aria-hidden="true"></span> Weather
-            </NavLink>
-        </div>
-    </nav>
-</div>
-

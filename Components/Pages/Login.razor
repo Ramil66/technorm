@@ -1,0 +1,342 @@
+@page "/login"
+@layout EmptyLayout
+@using Microsoft.AspNetCore.Http
+@inject IAuthService AuthService
+@inject NavigationManager Nav
+
+<PageTitle>Вход — ТехНорм</PageTitle>
+
+<HeadContent>
+    <style>
+        html, body {
+            margin: 0;
+            padding: 0;
+            background: #f8fafc;
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Arial, sans-serif;
+        }
+
+        @@keyframes fadeUp {
+            from { opacity: 0; transform: translateY(10px); }
+            to   { opacity: 1; transform: translateY(0); }
+        }
+
+        .ln-wrap {
+            min-height: 100vh;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            padding: 24px;
+        }
+
+        .ln-card {
+            background: #ffffff;
+            border: 1px solid #e2e8f0;
+            border-radius: 12px;
+            box-shadow: 0 2px 8px rgba(0,0,0,.07);
+            padding: 40px 36px 32px;
+            width: 100%;
+            max-width: 380px;
+            animation: fadeUp .3s ease both;
+        }
+
+        .ln-logo {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            margin-bottom: 28px;
+            gap: 10px;
+        }
+        .ln-logo-icon {
+            width: 52px;
+            height: 52px;
+            background: #2563eb;
+            border-radius: 14px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+        .ln-title {
+            font-size: 20px;
+            font-weight: 700;
+            color: #0f172a;
+            margin: 0;
+            letter-spacing: -.3px;
+        }
+        .ln-subtitle {
+            font-size: 13px;
+            color: #64748b;
+            margin: 0;
+        }
+
+        .ln-divider {
+            height: 1px;
+            background: #f1f5f9;
+            margin: 0 0 24px;
+        }
+
+        /* --- Поля --- */
+        .ln-field {
+            margin-bottom: 16px;
+        }
+        .ln-label {
+            display: block;
+            font-size: 13px;
+            font-weight: 600;
+            color: #374151;
+            margin-bottom: 6px;
+        }
+        .ln-input-wrap {
+            position: relative;
+            display: flex;
+            align-items: center;
+        }
+        .ln-input-icon {
+            position: absolute;
+            left: 11px;
+            top: 50%;
+            transform: translateY(-50%);
+            display: flex;
+            align-items: center;
+            pointer-events: none;
+            color: #94a3b8;
+        }
+        .ln-input {
+            width: 100%;
+            padding: 11px 12px 11px 36px;
+            border: 1.5px solid #e2e8f0;
+            border-radius: 8px;
+            font-size: 14px;
+            color: #0f172a;
+            background: #f8fafc;
+            box-sizing: border-box;
+            transition: border-color .15s, box-shadow .15s, background .15s;
+        }
+        .ln-input:focus {
+            outline: none;
+            border-color: #2563eb;
+            background: #fff;
+            box-shadow: 0 0 0 3px rgba(37,99,235,.12);
+        }
+        .ln-input::placeholder { color: #94a3b8; }
+
+        .ln-input-pr { padding-right: 40px; }
+
+        .ln-eye-btn {
+            position: absolute;
+            right: 8px;
+            top: 50%;
+            transform: translateY(-50%);
+            background: none;
+            border: none;
+            cursor: pointer;
+            padding: 4px 6px;
+            color: #94a3b8;
+            line-height: 1;
+            display: flex;
+            align-items: center;
+        }
+        .ln-eye-btn:hover { color: #475569; }
+
+        /* --- Ошибка --- */
+        .ln-error {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            padding: 10px 14px;
+            background: #fef2f2;
+            border: 1.5px solid #fecaca;
+            border-radius: 8px;
+            color: #dc2626;
+            font-size: 13px;
+            margin-bottom: 16px;
+        }
+
+        /* --- Кнопка --- */
+        .ln-btn {
+            width: 100%;
+            padding: 12px;
+            background: #2563eb;
+            color: #fff;
+            border: none;
+            border-radius: 8px;
+            font-size: 14px;
+            font-weight: 600;
+            cursor: pointer;
+            transition: background .15s;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 8px;
+        }
+        .ln-btn:hover:not(:disabled) { background: #1d4ed8; }
+        .ln-btn:disabled { opacity: .6; cursor: not-allowed; }
+
+        /* --- Быстрый вход --- */
+        .ln-quick {
+            display: flex;
+            justify-content: center;
+            gap: 20px;
+            margin-top: 20px;
+            padding-top: 16px;
+            border-top: 1px solid #f1f5f9;
+        }
+        .ln-quick-btn {
+            background: none;
+            border: none;
+            cursor: pointer;
+            padding: 0;
+            font-size: 12px;
+            color: #94a3b8;
+            transition: color .15s;
+        }
+        .ln-quick-btn:hover { color: #2563eb; }
+    </style>
+</HeadContent>
+
+<div class="ln-wrap">
+    <div class="ln-card">
+
+        <!-- Логотип -->
+        <div class="ln-logo">
+            <div class="ln-logo-icon">
+                <svg width="26" height="26" viewBox="0 0 24 24" fill="none"
+                     stroke="white" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                    <path d="M12 2a10 10 0 1 0 0 20A10 10 0 0 0 12 2Z" stroke="none"/>
+                    <path d="M12 15a3 3 0 1 0 0-6 3 3 0 0 0 0 6Z"
+                          fill="rgba(255,255,255,.25)" stroke="white"/>
+                    <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1Z"
+                          stroke="white"/>
+                </svg>
+            </div>
+            <h1 class="ln-title">ТехНорм</h1>
+            <p class="ln-subtitle">Система нормирования производства</p>
+        </div>
+
+        <div class="ln-divider"></div>
+
+        <!-- Форма -->
+        <form method="post" @formname="login">
+            <AntiforgeryToken />
+
+            <!-- Логин -->
+            <div class="ln-field">
+                <label class="ln-label">Логин</label>
+                <div class="ln-input-wrap">
+                    <span class="ln-input-icon">
+                        <!-- SVG пользователь -->
+                        <svg width="15" height="15" viewBox="0 0 24 24" fill="none"
+                             stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                            <path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/>
+                            <circle cx="12" cy="7" r="4"/>
+                        </svg>
+                    </span>
+                    <input id="ln-username" class="ln-input"
+                           type="text" name="Username"
+                           value="@Username"
+                           placeholder="Введите логин"
+                           autocomplete="username"
+                           required />
+                </div>
+            </div>
+
+            <!-- Пароль -->
+            <div class="ln-field">
+                <label class="ln-label">Пароль</label>
+                <div class="ln-input-wrap">
+                    <span class="ln-input-icon">
+                        <!-- SVG замок -->
+                        <svg width="15" height="15" viewBox="0 0 24 24" fill="none"
+                             stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                            <rect x="3" y="11" width="18" height="11" rx="2" ry="2"/>
+                            <path d="M7 11V7a5 5 0 0 1 10 0v4"/>
+                        </svg>
+                    </span>
+                    <input id="ln-password" class="ln-input ln-input-pr"
+                           type="password" name="Password"
+                           placeholder="Введите пароль"
+                           autocomplete="current-password"
+                           required />
+                    <button type="button" class="ln-eye-btn"
+                            onclick="(function(){var i=document.getElementById('ln-password'),b=document.getElementById('ln-eye-svg');if(i.type==='password'){i.type='text';b.innerHTML='<path d=\'M17.94 17.94A10.07 10.07 0 0 1 12 20c-7 0-11-8-11-8a18.45 18.45 0 0 1 5.06-5.94\'/><path d=\'M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 11 8 11 8a18.5 18.5 0 0 1-2.16 3.19\'/><line x1=\'1\' y1=\'1\' x2=\'23\' y2=\'23\'/>';}else{i.type='password';b.innerHTML='<path d=\'M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z\'/><circle cx=\'12\' cy=\'12\' r=\'3\'/>';}})()">
+                        <svg id="ln-eye-svg" width="16" height="16" viewBox="0 0 24 24" fill="none"
+                             stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                            <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/>
+                            <circle cx="12" cy="12" r="3"/>
+                        </svg>
+                    </button>
+                </div>
+            </div>
+
+            <!-- Ошибка -->
+            @if (!string.IsNullOrEmpty(ErrorMessage))
+            {
+                <div class="ln-error">
+                    <svg width="15" height="15" viewBox="0 0 24 24" fill="none"
+                         stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                        <circle cx="12" cy="12" r="10"/>
+                        <line x1="12" y1="8" x2="12" y2="12"/>
+                        <line x1="12" y1="16" x2="12.01" y2="16"/>
+                    </svg>
+                    @ErrorMessage
+                </div>
+            }
+
+            <!-- Кнопка -->
+            <button type="submit" class="ln-btn">
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none"
+                     stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+                    <path d="M15 3h4a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2h-4"/>
+                    <polyline points="10 17 15 12 10 7"/>
+                    <line x1="15" y1="12" x2="3" y2="12"/>
+                </svg>
+                Войти в систему
+            </button>
+        </form>
+
+        <!-- Быстрый вход -->
+        <div class="ln-quick">
+            <button class="ln-quick-btn"
+                    onclick="document.getElementById('ln-username').value='admin';document.getElementById('ln-password').value='admin123';">
+                Администратор
+            </button>
+            <button class="ln-quick-btn"
+                    onclick="document.getElementById('ln-username').value='technolog';document.getElementById('ln-password').value='tech123';">
+                Технолог
+            </button>
+        </div>
+
+    </div>
+</div>
+
+@code {
+    [CascadingParameter]
+    public HttpContext? HttpContext { get; set; }
+
+    [SupplyParameterFromForm(FormName = "login")]
+    public string? Username { get; set; }
+
+    [SupplyParameterFromForm(FormName = "login")]
+    public string? Password { get; set; }
+
+    public string? ErrorMessage { get; set; }
+
+    protected override async Task OnInitializedAsync()
+    {
+        if (HttpContext?.User.Identity?.IsAuthenticated == true)
+        {
+            Nav.NavigateTo("/", forceLoad: true);
+            return;
+        }
+
+        if (HttpMethods.IsPost(HttpContext?.Request.Method ?? "GET"))
+        {
+            var result = await AuthService.LoginAsync(
+                Username ?? "", Password ?? "", HttpContext!);
+
+            if (result.Success)
+                Nav.NavigateTo("/", forceLoad: true);
+            else
+                ErrorMessage = result.Error;
+        }
+    }
+}

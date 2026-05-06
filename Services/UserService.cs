@@ -19,8 +19,7 @@ public interface IUserService
 public class UserService(IDbContextFactory<TechNormDbContext> factory) : IUserService
 {
     private static string HashPassword(string password) =>
-        Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(
-            System.Text.Encoding.UTF8.GetBytes(password)));
+        BCrypt.Net.BCrypt.HashPassword(password, workFactor: 12);
 
     public async Task<List<User>> GetAllAsync()
     {
@@ -66,9 +65,9 @@ public class UserService(IDbContextFactory<TechNormDbContext> factory) : IUserSe
     public async Task<bool> ValidateCredentialsAsync(string username, string plainPassword)
     {
         using var db = await factory.CreateDbContextAsync();
-        var hash = HashPassword(plainPassword);
-        return await db.Users.AnyAsync(u =>
-            u.Username == username && u.PasswordHash == hash && u.IsActive);
+        var user = await db.Users.FirstOrDefaultAsync(u => u.Username == username && u.IsActive);
+        if (user is null) return false;
+        return BCrypt.Net.BCrypt.Verify(plainPassword, user.PasswordHash);
     }
 
     public async Task UpdateLastLoginAsync(int id)
