@@ -1,4 +1,4 @@
-namespace TechNorm.Api.Data.Entities;
+namespace TechNormBlazor.Data.Models;
 
 public class Material
 {

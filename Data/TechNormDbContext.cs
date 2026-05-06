@@ -1,7 +1,7 @@
 using Microsoft.EntityFrameworkCore;
-using TechNorm.Api.Data.Entities;
+using TechNormBlazor.Data.Models;
 
-namespace TechNorm.Api.Data;
+namespace TechNormBlazor.Data;
 
 public class TechNormDbContext(DbContextOptions<TechNormDbContext> options) : DbContext(options)
 {

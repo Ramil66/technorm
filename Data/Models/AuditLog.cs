@@ -1,7 +1,7 @@
 using System.Text.Json;
 using System.Net;
 
-namespace TechNorm.Api.Data.Entities;
+namespace TechNormBlazor.Data.Models;
 
 public class AuditLog
 {

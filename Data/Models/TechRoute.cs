@@ -1,6 +1,6 @@
 using System.Text.Json;
 
-namespace TechNorm.Api.Data.Entities;
+namespace TechNormBlazor.Data.Models;
 
 public class TechRoute
 {
