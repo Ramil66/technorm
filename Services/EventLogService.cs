@@ -11,6 +11,7 @@ public interface IEventLogService
     Task<List<EventLog>> GetByProductAsync(int productId);
     Task<EventLog> CreateAsync(EventLog eventLog);
     Task<List<EventLog>> CreateBatchAsync(IEnumerable<EventLog> events);
+    Task UpdateAsync(EventLog eventLog);
     Task DeleteAsync(long id);
 }
 
@@ -33,6 +34,8 @@ public class EventLogService(IDbContextFactory<TechNormDbContext> factory) : IEv
         return await db.EventLogs
             .Where(e => e.CaseId == caseId)
             .Include(e => e.Resource)
+            .Include(e => e.Product)
+            .Include(e => e.SourceDocument)
             .OrderBy(e => e.Timestamp)
             .ToListAsync();
     }
@@ -67,6 +70,21 @@ public class EventLogService(IDbContextFactory<TechNormDbContext> factory) : IEv
         db.EventLogs.AddRange(list);
         await db.SaveChangesAsync();
         return list;
+    }
+
+    public async Task UpdateAsync(EventLog eventLog)
+    {
+        using var db = await factory.CreateDbContextAsync();
+        var existing = await db.EventLogs.FindAsync(eventLog.Id);
+        if (existing is null) return;
+        existing.CaseId     = eventLog.CaseId;
+        existing.Activity   = eventLog.Activity;
+        existing.Timestamp  = eventLog.Timestamp;
+        existing.ProductId  = eventLog.ProductId;
+        existing.ResourceId = eventLog.ResourceId;
+        existing.Duration   = eventLog.Duration;
+        existing.Metadata   = eventLog.Metadata;
+        await db.SaveChangesAsync();
     }
 
     public async Task DeleteAsync(long id)

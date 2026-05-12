@@ -1,0 +1,443 @@
+@page "/admin/refs"
+@attribute [Authorize(Roles = "admin")]
+@rendermode InteractiveServer
+@inject IOperationService OpSvc
+@inject IResourceService ResSvc
+@inject IMaterialService MatSvc
+@inject IJSRuntime JS
+
+<PageTitle>Справочники — ТехНорм</PageTitle>
+
+<div class="page-header">
+    <h1><i class="fa-solid fa-book" style="color:var(--tn-blue);margin-right:10px;font-size:18px;"></i>Справочники</h1>
+    <button class="btn btn-primary btn-sm" @onclick="ShowAddModal">
+        <i class="fa-solid fa-plus me-1"></i>Добавить
+    </button>
+</div>
+
+<div class="tn-tabs">
+    <button class="tn-tab @(activeTab == 0 ? "active" : "")" @onclick="() => SetTab(0)">
+        <i class="fa-solid fa-list-check me-1"></i>Операции
+    </button>
+    <button class="tn-tab @(activeTab == 1 ? "active" : "")" @onclick="() => SetTab(1)">
+        <i class="fa-solid fa-screwdriver-wrench me-1"></i>Ресурсы
+    </button>
+    <button class="tn-tab @(activeTab == 2 ? "active" : "")" @onclick="() => SetTab(2)">
+        <i class="fa-solid fa-cubes me-1"></i>Материалы
+    </button>
+</div>
+
+<!-- === Операции === -->
+@if (activeTab == 0)
+{
+    <div class="card">
+        <div class="card-body p-0">
+            @if (!operations.Any())
+            {
+                <div class="empty-state"><i class="fa-solid fa-list-check d-block"></i><div>Операции не найдены</div></div>
+            }
+            else
+            {
+                <table class="table table-hover mb-0">
+                    <thead>
+                        <tr>
+                            <th>Код</th>
+                            <th>Наименование</th>
+                            <th>Описание</th>
+                            <th></th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        @foreach (var op in operations)
+                        {
+                            <tr>
+                                <td style="font-family:monospace;font-size:12px;">@op.Code</td>
+                                <td style="font-weight:500;">@op.Name</td>
+                                <td style="color:var(--tn-text-muted);max-width:280px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">@op.Description</td>
+                                <td>
+                                    <div class="d-flex gap-1">
+                                        <button class="btn btn-sm btn-outline-primary py-0 px-2" @onclick="() => ShowEditOpModal(op)">
+                                            <i class="fa-solid fa-pen"></i>
+                                        </button>
+                                        <button class="btn btn-sm btn-outline-danger py-0 px-2" @onclick="() => DeleteOp(op.Id)">
+                                            <i class="fa-solid fa-trash-can"></i>
+                                        </button>
+                                    </div>
+                                </td>
+                            </tr>
+                        }
+                    </tbody>
+                </table>
+            }
+        </div>
+    </div>
+}
+
+<!-- === Ресурсы === -->
+@if (activeTab == 1)
+{
+    <div class="card">
+        <div class="card-body p-0">
+            @if (!resources.Any())
+            {
+                <div class="empty-state"><i class="fa-solid fa-screwdriver-wrench d-block"></i><div>Ресурсы не найдены</div></div>
+            }
+            else
+            {
+                <table class="table table-hover mb-0">
+                    <thead>
+                        <tr>
+                            <th>Код</th>
+                            <th>Наименование</th>
+                            <th>Тип</th>
+                            <th>Статус</th>
+                            <th></th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        @foreach (var r in resources)
+                        {
+                            <tr>
+                                <td style="font-family:monospace;font-size:12px;">@r.Code</td>
+                                <td style="font-weight:500;">@r.Name</td>
+                                <td>
+                                    <span class="badge-status badge-new" style="font-size:11px;">@ResourceTypeLabel(r.Type)</span>
+                                </td>
+                                <td>
+                                    <span class="badge-status @(r.IsActive ? "badge-published" : "badge-archived")" style="font-size:11px;">
+                                        @(r.IsActive ? "Активен" : "Неактивен")
+                                    </span>
+                                </td>
+                                <td>
+                                    <div class="d-flex gap-1">
+                                        <button class="btn btn-sm btn-outline-primary py-0 px-2" @onclick="() => ShowEditResModal(r)">
+                                            <i class="fa-solid fa-pen"></i>
+                                        </button>
+                                        <button class="btn btn-sm btn-outline-danger py-0 px-2" @onclick="() => DeleteRes(r.Id)">
+                                            <i class="fa-solid fa-trash-can"></i>
+                                        </button>
+                                    </div>
+                                </td>
+                            </tr>
+                        }
+                    </tbody>
+                </table>
+            }
+        </div>
+    </div>
+}
+
+<!-- === Материалы === -->
+@if (activeTab == 2)
+{
+    <div class="card">
+        <div class="card-body p-0">
+            @if (!materials.Any())
+            {
+                <div class="empty-state"><i class="fa-solid fa-cubes d-block"></i><div>Материалы не найдены</div></div>
+            }
+            else
+            {
+                <table class="table table-hover mb-0">
+                    <thead>
+                        <tr>
+                            <th>Код</th>
+                            <th>Наименование</th>
+                            <th>Ед. изм.</th>
+                            <th>Описание</th>
+                            <th></th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        @foreach (var m in materials)
+                        {
+                            <tr>
+                                <td style="font-family:monospace;font-size:12px;">@m.Code</td>
+                                <td style="font-weight:500;">@m.Name</td>
+                                <td><span class="badge-status badge-processing" style="font-size:11px;">@m.Unit</span></td>
+                                <td style="color:var(--tn-text-muted);max-width:240px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">@m.Description</td>
+                                <td>
+                                    <div class="d-flex gap-1">
+                                        <button class="btn btn-sm btn-outline-primary py-0 px-2" @onclick="() => ShowEditMatModal(m)">
+                                            <i class="fa-solid fa-pen"></i>
+                                        </button>
+                                        <button class="btn btn-sm btn-outline-danger py-0 px-2" @onclick="() => DeleteMat(m.Id)">
+                                            <i class="fa-solid fa-trash-can"></i>
+                                        </button>
+                                    </div>
+                                </td>
+                            </tr>
+                        }
+                    </tbody>
+                </table>
+            }
+        </div>
+    </div>
+}
+
+<!-- === Модалка === -->
+@if (showModal)
+{
+    <div class="tn-backdrop" @onclick="CloseModal">
+        <div class="tn-modal" @onclick:stopPropagation>
+            <div class="tn-modal-header">
+                <h5>@ModalTitle</h5>
+                <button class="btn-close" @onclick="CloseModal"></button>
+            </div>
+
+            @if (activeTab == 0)
+            {
+                <div class="mb-3">
+                    <label class="form-label">Код</label>
+                    <input class="form-control" @bind="opForm.Code" placeholder="OP-001" />
+                </div>
+                <div class="mb-3">
+                    <label class="form-label">Наименование</label>
+                    <input class="form-control" @bind="opForm.Name" placeholder="Токарная обработка" />
+                </div>
+                <div class="mb-3">
+                    <label class="form-label">Описание</label>
+                    <textarea class="form-control" rows="2" @bind="opForm.Description"></textarea>
+                </div>
+            }
+            else if (activeTab == 1)
+            {
+                <div class="mb-3">
+                    <label class="form-label">Код</label>
+                    <input class="form-control" @bind="resForm.Code" placeholder="EQ-001" />
+                </div>
+                <div class="mb-3">
+                    <label class="form-label">Наименование</label>
+                    <input class="form-control" @bind="resForm.Name" placeholder="Токарный станок CNC-200" />
+                </div>
+                <div class="mb-3">
+                    <label class="form-label">Тип</label>
+                    <select class="form-select" @bind="resForm.Type">
+                        <option value="equipment">Оборудование</option>
+                        <option value="tool">Инструмент</option>
+                        <option value="personnel">Персонал</option>
+                        <option value="workstation">Рабочее место</option>
+                    </select>
+                </div>
+                <div class="mb-3">
+                    <div class="form-check">
+                        <input type="checkbox" class="form-check-input" @bind="resForm.IsActive" id="resActive" />
+                        <label class="form-check-label" for="resActive">Активен</label>
+                    </div>
+                </div>
+            }
+            else if (activeTab == 2)
+            {
+                <div class="mb-3">
+                    <label class="form-label">Код</label>
+                    <input class="form-control" @bind="matForm.Code" placeholder="MAT-001" />
+                </div>
+                <div class="mb-3">
+                    <label class="form-label">Наименование</label>
+                    <input class="form-control" @bind="matForm.Name" placeholder="Сталь 45" />
+                </div>
+                <div class="mb-3">
+                    <label class="form-label">Единица измерения</label>
+                    <input class="form-control" @bind="matForm.Unit" placeholder="кг, шт, м…" />
+                </div>
+                <div class="mb-3">
+                    <label class="form-label">Описание</label>
+                    <textarea class="form-control" rows="2" @bind="matForm.Description"></textarea>
+                </div>
+            }
+
+            @if (modalError is not null)
+            {
+                <div class="alert alert-danger py-2 mb-3" style="font-size:13px;">@modalError</div>
+            }
+
+            <div class="tn-modal-footer">
+                <button class="btn btn-secondary" @onclick="CloseModal">Отмена</button>
+                <button class="btn btn-primary" @onclick="Save">Сохранить</button>
+            </div>
+        </div>
+    </div>
+}
+
+@code {
+    private int activeTab;
+    private bool   showModal  = false;
+    private bool   isEditing  = false;
+    private string? modalError;
+
+    private List<Operation> operations = [];
+    private List<Resource>  resources  = [];
+    private List<Material>  materials  = [];
+
+    private int editId;
+
+    private OperationForm opForm  = new();
+    private ResourceForm  resForm = new();
+    private MaterialForm  matForm = new();
+
+    private string ModalTitle => activeTab switch
+    {
+        0 => isEditing ? "Редактировать операцию" : "Добавить операцию",
+        1 => isEditing ? "Редактировать ресурс"   : "Добавить ресурс",
+        _ => isEditing ? "Редактировать материал"  : "Добавить материал",
+    };
+
+    private class OperationForm
+    {
+        public string Code        { get; set; } = "";
+        public string Name        { get; set; } = "";
+        public string? Description { get; set; }
+    }
+    private class ResourceForm
+    {
+        public string Code     { get; set; } = "";
+        public string Name     { get; set; } = "";
+        public string Type     { get; set; } = "equipment";
+        public bool   IsActive { get; set; } = true;
+    }
+    private class MaterialForm
+    {
+        public string Code        { get; set; } = "";
+        public string Name        { get; set; } = "";
+        public string Unit        { get; set; } = "шт";
+        public string? Description { get; set; }
+    }
+
+    protected override async Task OnInitializedAsync()
+    {
+        operations = await OpSvc.GetAllAsync();
+    }
+
+    private async Task SetTab(int tab)
+    {
+        activeTab = tab;
+        if (tab == 1 && !resources.Any()) resources = await ResSvc.GetAllAsync();
+        if (tab == 2 && !materials.Any()) materials = await MatSvc.GetAllAsync();
+    }
+
+    private void ShowAddModal()
+    {
+        isEditing  = false;
+        editId     = 0;
+        modalError = null;
+        opForm  = new OperationForm();
+        resForm = new ResourceForm();
+        matForm = new MaterialForm();
+        showModal = true;
+    }
+
+    private void ShowEditOpModal(Operation op)
+    {
+        isEditing = true; editId = op.Id; modalError = null;
+        opForm = new OperationForm { Code = op.Code ?? "", Name = op.Name, Description = op.Description };
+        showModal = true;
+    }
+
+    private void ShowEditResModal(Resource r)
+    {
+        isEditing = true; editId = r.Id; modalError = null;
+        resForm = new ResourceForm { Code = r.Code ?? "", Name = r.Name, Type = r.Type, IsActive = r.IsActive };
+        showModal = true;
+    }
+
+    private void ShowEditMatModal(Material m)
+    {
+        isEditing = true; editId = m.Id; modalError = null;
+        matForm = new MaterialForm { Code = m.Code ?? "", Name = m.Name, Unit = m.Unit ?? "шт", Description = m.Description };
+        showModal = true;
+    }
+
+    private async Task Save()
+    {
+        modalError = null;
+        if (activeTab == 0) await SaveOp();
+        else if (activeTab == 1) await SaveRes();
+        else await SaveMat();
+    }
+
+    private async Task SaveOp()
+    {
+        if (string.IsNullOrWhiteSpace(opForm.Name)) { modalError = "Введите наименование."; return; }
+        if (isEditing)
+        {
+            var op = operations.First(o => o.Id == editId);
+            op.Code = opForm.Code; op.Name = opForm.Name; op.Description = opForm.Description;
+            await OpSvc.UpdateAsync(op);
+        }
+        else
+        {
+            var op = new Operation { Code = opForm.Code, Name = opForm.Name, Description = opForm.Description };
+            op = await OpSvc.CreateAsync(op);
+            operations.Add(op);
+        }
+        CloseModal();
+    }
+
+    private async Task SaveRes()
+    {
+        if (string.IsNullOrWhiteSpace(resForm.Name)) { modalError = "Введите наименование."; return; }
+        if (isEditing)
+        {
+            var r = resources.First(r => r.Id == editId);
+            r.Code = resForm.Code; r.Name = resForm.Name; r.Type = resForm.Type; r.IsActive = resForm.IsActive;
+            await ResSvc.UpdateAsync(r);
+        }
+        else
+        {
+            var r = new Resource { Code = resForm.Code, Name = resForm.Name, Type = resForm.Type, IsActive = resForm.IsActive };
+            r = await ResSvc.CreateAsync(r);
+            resources.Add(r);
+        }
+        CloseModal();
+    }
+
+    private async Task SaveMat()
+    {
+        if (string.IsNullOrWhiteSpace(matForm.Name)) { modalError = "Введите наименование."; return; }
+        if (isEditing)
+        {
+            var m = materials.First(m => m.Id == editId);
+            m.Code = matForm.Code; m.Name = matForm.Name; m.Unit = matForm.Unit; m.Description = matForm.Description;
+            await MatSvc.UpdateAsync(m);
+        }
+        else
+        {
+            var m = new Material { Code = matForm.Code, Name = matForm.Name, Unit = matForm.Unit, Description = matForm.Description };
+            m = await MatSvc.CreateAsync(m);
+            materials.Add(m);
+        }
+        CloseModal();
+    }
+
+    private async Task DeleteOp(int id)
+    {
+        if (!await JS.InvokeAsync<bool>("tnInterop.confirmDelete", "Удалить операцию?")) return;
+        await OpSvc.DeleteAsync(id);
+        operations.RemoveAll(o => o.Id == id);
+    }
+
+    private async Task DeleteRes(int id)
+    {
+        if (!await JS.InvokeAsync<bool>("tnInterop.confirmDelete", "Удалить ресурс?")) return;
+        await ResSvc.DeleteAsync(id);
+        resources.RemoveAll(r => r.Id == id);
+    }
+
+    private async Task DeleteMat(int id)
+    {
+        if (!await JS.InvokeAsync<bool>("tnInterop.confirmDelete", "Удалить материал?")) return;
+        await MatSvc.DeleteAsync(id);
+        materials.RemoveAll(m => m.Id == id);
+    }
+
+    private void CloseModal() { showModal = false; modalError = null; }
+
+    private static string ResourceTypeLabel(string t) => t switch
+    {
+        "equipment"   => "Оборудование",
+        "tool"        => "Инструмент",
+        "personnel"   => "Персонал",
+        "workstation" => "Рабочее место",
+        _ => t,
+    };
+}

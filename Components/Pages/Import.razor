@@ -1,0 +1,652 @@
+@page "/import"
+@attribute [Authorize]
+@rendermode InteractiveServer
+@inject IDocumentService      DocSvc
+@inject IDocumentParserService ParserSvc
+@inject IEventLogService      EventSvc
+@inject IResourceService      ResSvc
+@inject IProductService       ProdSvc
+@using System.Text.Json
+
+<PageTitle>Загрузка файлов — ТехНорм</PageTitle>
+
+<div class="page-header">
+    <h1><i class="fa-solid fa-file-arrow-up" style="color:var(--tn-blue);margin-right:10px;font-size:18px;"></i>Загрузка файлов</h1>
+    <span class="text-muted" style="font-size:13px;">@documents.Count файлов</span>
+</div>
+
+<AuthorizeView Roles="technologist">
+    <Authorized>
+        <div class="card mb-4">
+            <div class="card-body">
+                <div class="upload-zone @(isDragging ? "drag-over" : "")">
+                    <InputFile OnChange="HandleFiles" multiple
+                               accept=".xlsx,.xls,.pdf,.jpg,.jpeg,.png"
+                               @ondragenter="() => isDragging = true"
+                               @ondragleave="() => isDragging = false" />
+                    <div>
+                        <i class="fa-solid fa-cloud-arrow-up" style="font-size:36px;color:#94a3b8;margin-bottom:12px;display:block;"></i>
+                        <div style="font-size:15px;font-weight:600;margin-bottom:4px;">Перетащите файлы сюда или нажмите для выбора</div>
+                        <div style="font-size:13px;color:var(--tn-text-muted);">Поддерживаются: XLSX, XLS, PDF, JPG, PNG — до 50 МБ</div>
+                    </div>
+                </div>
+
+                @if (isUploading)
+                {
+                    <div class="d-flex align-items-center gap-2 mt-3 p-3" style="background:#eff6ff;border-radius:8px;">
+                        <div class="spinner-border spinner-border-sm text-primary" role="status"></div>
+                        <span style="font-size:13px;">Загрузка @uploadingName...</span>
+                    </div>
+                }
+                @if (uploadResult is not null)
+                {
+                    <div class="alert @(uploadError ? "alert-danger" : "alert-success") mt-3 mb-0 py-2" style="font-size:13px;">
+                        @uploadResult
+                    </div>
+                }
+            </div>
+        </div>
+    </Authorized>
+</AuthorizeView>
+
+<!-- Список файлов -->
+<div class="card">
+    <div class="card-header">
+        <div class="row align-items-center g-2">
+            <div class="col">
+                <i class="fa-solid fa-folder-open" style="color:var(--tn-blue);margin-right:6px;"></i>
+                Загруженные файлы
+            </div>
+            <div class="col-auto">
+                <select class="form-select form-select-sm" style="width:180px;" @bind="filterStatus" @bind:after="ApplyFilter">
+                    <option value="">Все статусы</option>
+                    <option value="new">Новые</option>
+                    <option value="processing">В обработке</option>
+                    <option value="processed">Обработаны</option>
+                    <option value="error">Ошибка</option>
+                </select>
+            </div>
+        </div>
+    </div>
+    <div class="card-body p-0">
+        @if (!filteredDocs.Any())
+        {
+            <div class="empty-state">
+                <i class="fa-solid fa-file d-block"></i>
+                <div>Файлы не найдены</div>
+            </div>
+        }
+        else
+        {
+            <table class="table table-hover mb-0">
+                <thead>
+                    <tr>
+                        <th></th>
+                        <th>Имя файла</th>
+                        <th>Размер</th>
+                        <th>Дата загрузки</th>
+                        <th>Загрузил</th>
+                        <th>Статус</th>
+                        <th></th>
+                    </tr>
+                </thead>
+                <tbody>
+                    @foreach (var d in filteredDocs)
+                    {
+                        <tr>
+                            <td style="width:40px;text-align:center;">
+                                @switch (d.FileType)
+                                {
+                                    case "excel":
+                                        <i class="fa-solid fa-file-excel" style="color:#16a34a;font-size:18px;"></i>
+                                        break;
+                                    case "pdf":
+                                        <i class="fa-solid fa-file-pdf" style="color:#dc2626;font-size:18px;"></i>
+                                        break;
+                                    default:
+                                        <i class="fa-solid fa-file-image" style="color:#ca8a04;font-size:18px;"></i>
+                                        break;
+                                }
+                            </td>
+                            <td style="max-width:200px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;" title="@d.OriginalName">
+                                <span style="color:var(--tn-blue);cursor:pointer;text-decoration:underline;text-underline-offset:2px;"
+                                      @onclick="() => OpenFileViewer(d)">
+                                    @d.OriginalName
+                                </span>
+                            </td>
+                            <td style="white-space:nowrap;">@FormatSize(d.FileSize)</td>
+                            <td style="white-space:nowrap;">@d.UploadedAt.ToLocalTime().ToString("dd.MM.yy HH:mm")</td>
+                            <td>@(d.Uploader?.FullName ?? "—")</td>
+                            <td>
+                                <span class="badge-status @StatusBadge(d.Status)" style="font-size:11px;">
+                                    @StatusLabel(d.Status)
+                                </span>
+                            </td>
+                            <td style="white-space:nowrap;">
+                                @if (d.Status == "new" && (d.FileType == "pdf" || d.FileType == "excel"))
+                                {
+                                    <AuthorizeView Roles="technologist">
+                                        <Authorized>
+                                            <button class="btn btn-sm btn-outline-primary btn-process me-1"
+                                                    title="Предпросмотр и обработка"
+                                                    @onclick="() => OpenPreviewForDoc(d)">
+                                                <i class="fa-solid fa-wand-magic-sparkles"></i> Обработать
+                                            </button>
+                                        </Authorized>
+                                    </AuthorizeView>
+                                }
+                                <AuthorizeView Roles="technologist">
+                                    <Authorized>
+                                        <button class="btn btn-sm btn-outline-danger py-0 px-2"
+                                                title="Удалить" @onclick="() => AskDeleteDoc(d.Id)">
+                                            <i class="fa-solid fa-trash-can"></i>
+                                        </button>
+                                    </Authorized>
+                                </AuthorizeView>
+                            </td>
+                        </tr>
+                    }
+                </tbody>
+            </table>
+        }
+    </div>
+</div>
+
+@if (viewerDoc is not null)
+{
+    <div class="tn-backdrop" @onclick="CloseFileViewer">
+        <div class="tn-modal-viewer" @onclick:stopPropagation>
+            <div class="viewer-header">
+                <div class="viewer-title">
+                    @if (viewerDoc.FileType == "pdf")
+                    {
+                        <i class="fa-solid fa-file-pdf me-2" style="color:#dc2626;"></i>
+                    }
+                    else if (viewerDoc.FileType == "excel")
+                    {
+                        <i class="fa-solid fa-file-excel me-2" style="color:#16a34a;"></i>
+                    }
+                    else
+                    {
+                        <i class="fa-solid fa-file-image me-2" style="color:#ca8a04;"></i>
+                    }
+                    @viewerDoc.OriginalName
+                </div>
+                <button class="btn btn-sm btn-outline-secondary" @onclick="CloseFileViewer">
+                    <i class="fa-solid fa-xmark me-1"></i>Закрыть
+                </button>
+            </div>
+            <div class="viewer-body">
+                @if (viewerDoc.FileType == "pdf")
+                {
+                    <iframe src="/api/files/@viewerDoc.Id" style="width:100%;height:100%;border:none;"></iframe>
+                }
+                else if (viewerDoc.FileType == "image")
+                {
+                    <div style="display:flex;align-items:center;justify-content:center;height:100%;padding:16px;">
+                        <img src="/api/files/@viewerDoc.Id"
+                             style="max-width:100%;max-height:100%;object-fit:contain;border-radius:6px;" />
+                    </div>
+                }
+                else
+                {
+                    <iframe src="/api/files/@viewerDoc.Id/preview" style="width:100%;height:100%;border:none;background:#fff;"></iframe>
+                }
+            </div>
+            <div class="viewer-footer">
+                <a href="/api/files/@viewerDoc.Id?download=true" class="btn btn-outline-primary" target="_blank">
+                    <i class="fa-solid fa-download me-1"></i>Скачать
+                </a>
+                <AuthorizeView Roles="technologist">
+                    <Authorized>
+                        <button class="btn btn-outline-danger" @onclick="() => AskDeleteDocFromViewer(viewerDoc.Id)">
+                            <i class="fa-solid fa-trash-can me-1"></i>Удалить
+                        </button>
+                    </Authorized>
+                </AuthorizeView>
+            </div>
+        </div>
+    </div>
+}
+
+@if (deleteConfirmDocId > 0)
+{
+    <div class="tn-backdrop" @onclick="CancelDeleteDoc">
+        <div class="tn-modal" @onclick:stopPropagation style="max-width:360px;text-align:center;padding:32px 28px;">
+            <div style="font-size:44px;margin-bottom:16px;color:#dc2626;">
+                <i class="fa-solid fa-triangle-exclamation"></i>
+            </div>
+            <div style="font-size:16px;font-weight:600;margin-bottom:8px;">Удалить файл?</div>
+            <div style="font-size:13px;color:var(--tn-text-muted);margin-bottom:24px;">
+                Файл будет удалён без возможности восстановления.
+            </div>
+            <div class="d-flex gap-2 justify-content-center">
+                <button class="btn btn-outline-secondary" @onclick="CancelDeleteDoc">Отмена</button>
+                <button class="btn btn-danger" @onclick="ConfirmDeleteDoc">
+                    <i class="fa-solid fa-trash-can me-1"></i>Удалить
+                </button>
+            </div>
+        </div>
+    </div>
+}
+
+@if (showPreview)
+{
+    <div class="tn-backdrop" @onclick="ClosePreview">
+        <div class="tn-modal-xl" @onclick:stopPropagation>
+            <div class="tn-modal-header">
+                <div>
+                    <h5 style="margin-bottom:2px;">
+                        <i class="fa-solid fa-table-list" style="color:var(--tn-blue);margin-right:8px;"></i>
+                        Предпросмотр: @previewDocName
+                    </h5>
+                    <div style="font-size:12px;color:var(--tn-text-muted);">
+                        Проверьте и отредактируйте данные перед сохранением в журнал событий
+                    </div>
+                </div>
+                <button class="btn btn-sm btn-outline-secondary" @onclick="ClosePreview">
+                    <i class="fa-solid fa-xmark"></i>
+                </button>
+            </div>
+
+            @if (isParsing)
+            {
+                <div class="d-flex align-items-center gap-3 py-4 justify-content-center">
+                    <div class="spinner-border text-primary" role="status"></div>
+                    <span>Распознавание файла...</span>
+                </div>
+            }
+            else
+            {
+                <!-- Статистика -->
+                <div class="d-flex align-items-center gap-3 mb-3">
+                    <span class="parsed-badge">
+                        <i class="fa-solid fa-check-circle"></i> Распознано @previewRows.Count строк
+                    </span>
+                    @if (saveError is not null)
+                    {
+                        <span style="color:#dc2626;font-size:12px;"><i class="fa-solid fa-circle-exclamation"></i> @saveError</span>
+                    }
+                    <button class="btn btn-sm btn-outline-success ms-auto" @onclick="AddEmptyRow">
+                        <i class="fa-solid fa-plus"></i> Добавить строку
+                    </button>
+                </div>
+
+                <!-- Таблица с данными -->
+                <div style="overflow-x:auto;">
+                    <table class="preview-table">
+                        <thead>
+                            <tr>
+                                <th style="min-width:100px;">ID дела *</th>
+                                <th style="min-width:140px;">Операция *</th>
+                                <th style="min-width:105px;">Дата *</th>
+                                <th style="min-width:55px;">Смена</th>
+                                <th style="min-width:130px;">Изделие</th>
+                                <th style="min-width:150px;">Ресурс</th>
+                                <th style="min-width:70px;">Длит., мин</th>
+                                <th style="min-width:60px;">Кол-во</th>
+                                <th style="width:32px;"></th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            @for (int i = 0; i < previewRows.Count; i++)
+                            {
+                                var row = previewRows[i];
+                                var idx = i;
+                                <tr>
+                                    <td>
+                                        <input value="@row.CaseId"
+                                               @onchange="e => row.CaseId = e.Value?.ToString() ?? string.Empty" />
+                                    </td>
+                                    <td>
+                                        <input value="@row.Activity"
+                                               @onchange="e => row.Activity = e.Value?.ToString() ?? string.Empty" />
+                                    </td>
+                                    <td>
+                                        <input value="@row.DateStr"
+                                               placeholder="дд.мм.гггг"
+                                               @onchange="e => row.DateStr = e.Value?.ToString() ?? string.Empty" />
+                                    </td>
+                                    <td>
+                                        <select value="@row.Shift"
+                                                @onchange="e => row.Shift = int.TryParse(e.Value?.ToString(), out var s) ? s : 1">
+                                            <option value="1">1</option>
+                                            <option value="2">2</option>
+                                            <option value="3">3</option>
+                                        </select>
+                                    </td>
+                                    <td>
+                                        <select value="@row.ProductId"
+                                                @onchange="e => row.ProductId = int.TryParse(e.Value?.ToString(), out var p) && p > 0 ? p : null">
+                                            <option value="0">— не указано —</option>
+                                            @foreach (var p in allProducts)
+                                            {
+                                                <option value="@p.Id">@p.Name</option>
+                                            }
+                                        </select>
+                                    </td>
+                                    <td>
+                                        <select value="@row.ResourceId"
+                                                @onchange="e => row.ResourceId = int.TryParse(e.Value?.ToString(), out var r) && r > 0 ? r : null">
+                                            <option value="0">— не указано —</option>
+                                            @foreach (var r in allResources)
+                                            {
+                                                <option value="@r.Id">@r.Name</option>
+                                            }
+                                        </select>
+                                    </td>
+                                    <td>
+                                        <input type="number" min="0" step="0.5"
+                                               value="@row.DurationMin.ToString(System.Globalization.CultureInfo.InvariantCulture)"
+                                               @onchange="e => row.DurationMin = decimal.TryParse(e.Value?.ToString(), System.Globalization.NumberStyles.Any, System.Globalization.CultureInfo.InvariantCulture, out var d) ? d : 0" />
+                                    </td>
+                                    <td>
+                                        <input type="number" min="1"
+                                               value="@row.Quantity"
+                                               @onchange="e => row.Quantity = int.TryParse(e.Value?.ToString(), out var q) && q > 0 ? q : 1" />
+                                    </td>
+                                    <td style="text-align:center;">
+                                        <button class="btn btn-sm btn-outline-danger py-0 px-1"
+                                                title="Удалить строку"
+                                                @onclick="() => previewRows.RemoveAt(idx)">
+                                            <i class="fa-solid fa-trash-can" style="font-size:10px;"></i>
+                                        </button>
+                                    </td>
+                                </tr>
+                            }
+                        </tbody>
+                    </table>
+                </div>
+
+                @if (previewRows.Count == 0)
+                {
+                    <div class="empty-state py-3" style="font-size:13px;">
+                        <i class="fa-solid fa-file-circle-question d-block" style="font-size:32px;"></i>
+                        <div>Не удалось распознать строки. Добавьте данные вручную.</div>
+                    </div>
+                }
+            }
+
+            <div class="tn-modal-footer">
+                <button class="btn btn-outline-secondary" @onclick="ClosePreview" disabled="@isSaving">
+                    Отмена
+                </button>
+                <button class="btn btn-primary" @onclick="SavePreview"
+                        disabled="@(isParsing || isSaving || previewRows.Count == 0)">
+                    @if (isSaving)
+                    {
+                        <span class="spinner-border spinner-border-sm me-1" role="status"></span>
+                    }
+                    <i class="fa-solid fa-floppy-disk me-1"></i>
+                    Сохранить и обработать (@previewRows.Count)
+                </button>
+            </div>
+        </div>
+    </div>
+}
+
+@code {
+    [CascadingParameter] private Task<AuthenticationState> AuthStateTask { get; set; } = default!;
+
+    private List<Document>    documents    = [];
+    private List<Document>    filteredDocs = [];
+    private List<Resource>    allResources = [];
+    private List<Product>     allProducts  = [];
+    private string  filterStatus  = "";
+    private bool    isDragging    = false;
+    private bool    isUploading   = false;
+    private bool    uploadError   = false;
+    private string? uploadResult;
+    private string? uploadingName;
+    private int     currentUserId;
+
+    // ── File viewer state ─────────────────────────────────────────────────────
+    private Document?     viewerDoc         = null;
+    private int           deleteConfirmDocId = 0;
+
+    // ── Preview state ─────────────────────────────────────────────────────────
+    private bool          showPreview  = false;
+    private bool          isParsing    = false;
+    private bool          isSaving     = false;
+    private string?       saveError;
+    private string        previewDocName = "";
+    private int           previewDocId   = 0;
+    private List<ParsedRow> previewRows  = [];
+
+    protected override async Task OnInitializedAsync()
+    {
+        var state = await AuthStateTask;
+        currentUserId = int.Parse(state.User.FindFirst("UserId")?.Value ?? "0");
+
+        var t1 = DocSvc.GetAllAsync();
+        var t2 = ResSvc.GetAllAsync();
+        var t3 = ProdSvc.GetAllAsync();
+        await Task.WhenAll(t1, t2, t3);
+
+        documents    = t1.Result;
+        allResources = t2.Result;
+        allProducts  = t3.Result;
+        ApplyFilter();
+    }
+
+    // ── Upload ────────────────────────────────────────────────────────────────
+    private async Task HandleFiles(InputFileChangeEventArgs e)
+    {
+        isDragging   = false;
+        uploadResult = null;
+        int successCount = 0;
+        Document? lastUploaded = null;
+
+        foreach (var file in e.GetMultipleFiles(20))
+        {
+            if (file.Size > 50 * 1024 * 1024)
+            {
+                uploadResult = $"Файл {file.Name} превышает 50 МБ — пропущен.";
+                uploadError  = true;
+                continue;
+            }
+
+            isUploading   = true;
+            uploadingName = file.Name;
+            StateHasChanged();
+
+            try
+            {
+                var ext      = Path.GetExtension(file.Name).ToLowerInvariant();
+                var fileType = ext switch
+                {
+                    ".xlsx" or ".xls"          => "excel",
+                    ".pdf"                     => "pdf",
+                    ".jpg" or ".jpeg" or ".png" => "image",
+                    _                          => "unknown",
+                };
+
+                await using var stream = file.OpenReadStream(50 * 1024 * 1024);
+                var doc = await DocSvc.SaveAsync(stream, file.Name, fileType, currentUserId);
+                documents.Insert(0, doc);
+                successCount++;
+                lastUploaded = doc;
+            }
+            catch (Exception ex)
+            {
+                uploadResult = $"Ошибка при загрузке {file.Name}: {ex.Message}";
+                uploadError  = true;
+            }
+            finally
+            {
+                isUploading = false;
+            }
+        }
+
+        if (successCount > 0)
+        {
+            uploadResult = $"Загружено {successCount} файл(ов). Проверьте данные в окне предпросмотра.";
+            uploadError  = false;
+        }
+
+        ApplyFilter();
+
+        // Automatically open preview for the last uploaded parseable file
+        if (lastUploaded is not null &&
+            (lastUploaded.FileType == "pdf" || lastUploaded.FileType == "excel"))
+        {
+            await OpenPreviewForDoc(lastUploaded);
+        }
+    }
+
+    // ── Preview modal ─────────────────────────────────────────────────────────
+    private async Task OpenPreviewForDoc(Document doc)
+    {
+        previewDocId   = doc.Id;
+        previewDocName = doc.OriginalName;
+        previewRows    = [];
+        saveError      = null;
+        isParsing      = true;
+        showPreview    = true;
+        StateHasChanged();
+
+        try
+        {
+            previewRows = await ParserSvc.ParseAsync(doc, allResources, allProducts);
+        }
+        finally
+        {
+            isParsing = false;
+        }
+    }
+
+    private void ClosePreview()
+    {
+        if (isSaving) return;
+        showPreview = false;
+        saveError   = null;
+    }
+
+    private void AddEmptyRow() =>
+        previewRows.Add(new ParsedRow { DateStr = DateTime.Today.ToString("dd.MM.yyyy") });
+
+    private async Task SavePreview()
+    {
+        saveError = null;
+
+        // Validate
+        var invalid = previewRows.Where(r => string.IsNullOrWhiteSpace(r.CaseId) ||
+                                             string.IsNullOrWhiteSpace(r.Activity)).ToList();
+        if (invalid.Any())
+        {
+            saveError = $"Заполните обязательные поля (ID дела, Операция) во всех строках.";
+            return;
+        }
+
+        isSaving = true;
+        StateHasChanged();
+
+        try
+        {
+            var eventLogs = previewRows.Select(r =>
+            {
+                var meta = JsonDocument.Parse(System.Text.Json.JsonSerializer.Serialize(new
+                {
+                    Shift      = r.Shift,
+                    Quantity   = r.Quantity,
+                    OperationId = (int?)null,
+                }));
+
+                return new EventLog
+                {
+                    CaseId           = r.CaseId.Trim(),
+                    Activity         = r.Activity.Trim(),
+                    Timestamp        = r.ParsedDate,
+                    ResourceId       = r.ResourceId,
+                    ProductId        = r.ProductId,
+                    Duration         = r.DurationMin > 0 ? TimeSpan.FromMinutes((double)r.DurationMin) : null,
+                    Source           = "document",
+                    SourceDocumentId = previewDocId,
+                    CreatedBy        = currentUserId,
+                    Metadata         = meta,
+                };
+            }).ToList();
+
+            await EventSvc.CreateBatchAsync(eventLogs);
+            await DocSvc.UpdateStatusAsync(previewDocId, "processed");
+
+            // Refresh document in local list
+            var updated = documents.FirstOrDefault(d => d.Id == previewDocId);
+            if (updated is not null) updated.Status = "processed";
+
+            showPreview  = false;
+            uploadResult = $"Обработано: {eventLogs.Count} событий сохранено в журнал.";
+            uploadError  = false;
+            ApplyFilter();
+        }
+        catch (Exception ex)
+        {
+            saveError = $"Ошибка при сохранении: {ex.Message}";
+        }
+        finally
+        {
+            isSaving = false;
+        }
+    }
+
+    // ── File viewer ───────────────────────────────────────────────────────────
+    private void OpenFileViewer(Document doc) => viewerDoc = doc;
+    private void CloseFileViewer()            => viewerDoc = null;
+
+    // ── Delete ────────────────────────────────────────────────────────────────
+    private void AskDeleteDoc(int id)
+    {
+        deleteConfirmDocId = id;
+    }
+
+    private void AskDeleteDocFromViewer(int id)
+    {
+        deleteConfirmDocId = id;
+    }
+
+    private void CancelDeleteDoc() => deleteConfirmDocId = 0;
+
+    private async Task ConfirmDeleteDoc()
+    {
+        var id = deleteConfirmDocId;
+        deleteConfirmDocId = 0;
+        if (viewerDoc?.Id == id) viewerDoc = null;
+        await DocSvc.DeleteAsync(id);
+        documents.RemoveAll(d => d.Id == id);
+        ApplyFilter();
+    }
+
+    // ── Helpers ───────────────────────────────────────────────────────────────
+    private void ApplyFilter()
+    {
+        filteredDocs = string.IsNullOrEmpty(filterStatus)
+            ? [.. documents]
+            : documents.Where(d => d.Status == filterStatus).ToList();
+    }
+
+    private static string FormatSize(long? bytes)
+    {
+        if (bytes is null) return "—";
+        if (bytes < 1024) return $"{bytes} Б";
+        if (bytes < 1024 * 1024) return $"{bytes / 1024.0:F1} КБ";
+        return $"{bytes / (1024.0 * 1024):F1} МБ";
+    }
+
+    private static string StatusBadge(string s) => s switch
+    {
+        "new"        => "badge-new",
+        "processing" => "badge-processing",
+        "processed"  => "badge-processed",
+        "error"      => "badge-error",
+        _            => "badge-new",
+    };
+
+    private static string StatusLabel(string s) => s switch
+    {
+        "new"        => "Новый",
+        "processing" => "Обработка",
+        "processed"  => "Обработан",
+        "error"      => "Ошибка",
+        _            => s,
+    };
+}

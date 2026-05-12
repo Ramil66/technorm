@@ -1,0 +1,280 @@
+@page "/profile"
+@attribute [Authorize]
+@rendermode InteractiveServer
+@inject IDashboardService Dashboard
+@inject IUserService UserSvc
+@using System.Globalization
+
+<PageTitle>Профиль — ТехНорм</PageTitle>
+
+<div class="page-header">
+    <h1><i class="fa-regular fa-circle-user" style="color:var(--tn-blue);margin-right:10px;font-size:18px;"></i>Профиль</h1>
+</div>
+
+@if (isLoading)
+{
+    <div class="d-flex justify-content-center py-5">
+        <div class="spinner-border text-primary" role="status"></div>
+    </div>
+}
+else if (currentUser is not null)
+{
+    <div class="row g-4">
+        <!-- Левая колонка: карточка пользователя -->
+        <div class="col-lg-4">
+            <div class="card mb-4">
+                <div class="card-body text-center" style="padding:28px;">
+                    <!-- Аватар с инициалами -->
+                    <div style="width:72px;height:72px;border-radius:50%;background:var(--tn-blue);color:#fff;
+                                display:flex;align-items:center;justify-content:center;font-size:24px;font-weight:700;
+                                margin:0 auto 16px;">
+                        @GetInitials(currentUser.FullName)
+                    </div>
+                    <div style="font-size:18px;font-weight:700;margin-bottom:4px;">@currentUser.FullName</div>
+                    <span class="badge-status @(currentUser.Role == "admin" ? "role-badge-admin" : "role-badge-tech")" style="font-size:12px;margin-bottom:12px;display:inline-flex;">
+                        <i class="fa-solid @(currentUser.Role == "admin" ? "fa-shield-halved" : "fa-user-gear") me-1"></i>
+                        @(currentUser.Role == "admin" ? "Администратор" : "Технолог-нормировщик")
+                    </span>
+                    <div class="text-muted" style="font-size:13px;margin-top:8px;">
+                        <i class="fa-regular fa-envelope me-1"></i>@(currentUser.Email ?? "—")
+                    </div>
+                    <div class="text-muted" style="font-size:12px;margin-top:6px;">
+                        <i class="fa-regular fa-calendar me-1"></i>
+                        Регистрация: @currentUser.CreatedAt.ToLocalTime().ToString("dd.MM.yyyy")
+                    </div>
+                    @if (currentUser.LastLogin.HasValue)
+                    {
+                        <div class="text-muted" style="font-size:12px;margin-top:4px;">
+                            <i class="fa-regular fa-clock me-1"></i>
+                            Последний вход: @currentUser.LastLogin.Value.ToLocalTime().ToString("dd.MM.yyyy HH:mm")
+                        </div>
+                    }
+                </div>
+            </div>
+
+            <!-- Мини-статистика -->
+            @if (stats is not null)
+            {
+                <div class="card">
+                    <div class="card-header">Статистика</div>
+                    <div class="card-body">
+                        <div class="row g-2">
+                            <div class="col-6">
+                                <div class="stat-mini">
+                                    <div class="stat-mini-val">@stats.TotalEvents</div>
+                                    <div class="stat-mini-lbl">Событий</div>
+                                </div>
+                            </div>
+                            <div class="col-6">
+                                <div class="stat-mini">
+                                    <div class="stat-mini-val">@stats.TotalDocuments</div>
+                                    <div class="stat-mini-lbl">Документов</div>
+                                </div>
+                            </div>
+                            <div class="col-6">
+                                <div class="stat-mini">
+                                    <div class="stat-mini-val">@stats.RoutesViewed</div>
+                                    <div class="stat-mini-lbl">Маршрутов</div>
+                                </div>
+                            </div>
+                            <div class="col-6">
+                                <div class="stat-mini">
+                                    <div class="stat-mini-val">@stats.ActiveDays</div>
+                                    <div class="stat-mini-lbl">Активных дней</div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            }
+        </div>
+
+        <!-- Правая колонка: тепловая карта + последние действия -->
+        <div class="col-lg-8">
+            <!-- Тепловая карта активности (только технолог) -->
+            <AuthorizeView Roles="technologist">
+                <Authorized>
+                    <div class="card mb-4">
+                        <div class="card-header">
+                            <i class="fa-solid fa-fire" style="color:var(--tn-blue);margin-right:6px;"></i>
+                            Активность за год
+                        </div>
+                        <div class="card-body">
+                            @{
+                                var ruCulture  = CultureInfo.GetCultureInfo("ru-RU");
+                                var today      = DateOnly.FromDateTime(DateTime.Today);
+                                var startDate  = today.AddDays(-364);
+                                int dow0 = ((int)startDate.DayOfWeek + 6) % 7;
+                                startDate = startDate.AddDays(-dow0);
+
+                                // Build weeks list
+                                var weeks = new List<DateOnly>();
+                                for (var wk = startDate; wk <= today; wk = wk.AddDays(7))
+                                    weeks.Add(wk);
+
+                                // Month label per column (show when month changes)
+                                var monthLabels = new string?[weeks.Count];
+                                int prevMonth = -1;
+                                for (int wi = 0; wi < weeks.Count; wi++)
+                                {
+                                    if (weeks[wi].Month != prevMonth)
+                                    {
+                                        monthLabels[wi] = ruCulture.DateTimeFormat.AbbreviatedMonthNames[weeks[wi].Month - 1];
+                                        prevMonth = weeks[wi].Month;
+                                    }
+                                }
+                            }
+                            <div class="heatmap-outer">
+                                <!-- Month labels row -->
+                                <div class="heatmap-months">
+                                    @for (int wi = 0; wi < weeks.Count; wi++)
+                                    {
+                                        <div class="heatmap-month-label" style="width:16px;flex-shrink:0;">
+                                            @(monthLabels[wi] ?? "")
+                                        </div>
+                                    }
+                                </div>
+                                <!-- Cells grid -->
+                                <div class="heatmap-grid">
+                                    @for (int wi = 0; wi < weeks.Count; wi++)
+                                    {
+                                        var wkStart = weeks[wi];
+                                        <div class="heatmap-week">
+                                            @for (int d = 0; d < 7; d++)
+                                            {
+                                                var day   = wkStart.AddDays(d);
+                                                int count = activityMap.TryGetValue(day, out var c) ? c : 0;
+                                                string cls = count == 0 ? "" :
+                                                             count == 1 ? "lv1" :
+                                                             count <= 3 ? "lv2" :
+                                                             count <= 6 ? "lv3" :
+                                                             count <= 10 ? "lv4" : "lv5";
+                                                <div class="heatmap-cell-wrap">
+                                                    <div class="heatmap-cell @cls"></div>
+                                                    <div class="heatmap-tooltip">
+                                                        @day.ToString("dd MMM yyyy", ruCulture)<br/>
+                                                        @count @(count == 1 ? "событие" : count is >= 2 and <= 4 ? "события" : "событий")
+                                                    </div>
+                                                </div>
+                                            }
+                                        </div>
+                                    }
+                                </div>
+                            </div>
+                            <div class="d-flex align-items-center gap-2 mt-2" style="font-size:11px;color:var(--tn-text-muted);">
+                                <span>Меньше</span>
+                                <div class="heatmap-cell"></div>
+                                <div class="heatmap-cell lv1"></div>
+                                <div class="heatmap-cell lv2"></div>
+                                <div class="heatmap-cell lv3"></div>
+                                <div class="heatmap-cell lv4"></div>
+                                <div class="heatmap-cell lv5"></div>
+                                <span>Больше</span>
+                            </div>
+                        </div>
+                    </div>
+                </Authorized>
+            </AuthorizeView>
+
+            <!-- Последние действия -->
+            <div class="card">
+                <div class="card-header">
+                    <i class="fa-solid fa-list-check" style="color:var(--tn-blue);margin-right:6px;"></i>
+                    Последние действия
+                </div>
+                <div class="card-body" style="padding:8px 16px;">
+                    @if (!recentActions.Any())
+                    {
+                        <div class="empty-state py-3" style="border:none;">
+                            <div>Действия не найдены</div>
+                        </div>
+                    }
+                    else
+                    {
+                        @foreach (var a in recentActions)
+                        {
+                            <div class="event-item">
+                                <div class="event-icon" style="@ActionIconStyle(a.Action)">
+                                    <i class="fa-solid @ActionIcon(a.Action)"></i>
+                                </div>
+                                <div class="event-info">
+                                    <div class="event-desc">@a.Action</div>
+                                    <div class="event-meta">
+                                        @if (a.EntityType is not null)
+                                        {
+                                            <span>@a.EntityType · </span>
+                                        }
+                                        @TimeAgo(a.CreatedAt)
+                                    </div>
+                                </div>
+                            </div>
+                        }
+                    }
+                </div>
+            </div>
+        </div>
+    </div>
+}
+
+@code {
+    [CascadingParameter] private Task<AuthenticationState> AuthStateTask { get; set; } = default!;
+
+    private bool          isLoading = true;
+    private User?         currentUser;
+    private UserProfileStats? stats;
+    private Dictionary<DateOnly, int> activityMap  = [];
+    private List<AuditLog>            recentActions = [];
+
+    protected override async Task OnInitializedAsync()
+    {
+        var state  = await AuthStateTask;
+        var userId = int.Parse(state.User.FindFirst("UserId")?.Value ?? "0");
+
+        var t1 = UserSvc.GetByIdAsync(userId);
+        var t2 = Dashboard.GetUserStatsAsync(userId);
+        var t3 = Dashboard.GetUserActivityAsync(userId);
+        var t4 = Dashboard.GetUserRecentActionsAsync(userId, 15);
+        await Task.WhenAll(t1, t2, t3, t4);
+
+        currentUser   = t1.Result;
+        stats         = t2.Result;
+        activityMap   = t3.Result;
+        recentActions = t4.Result;
+        isLoading     = false;
+    }
+
+    private static string GetInitials(string name)
+    {
+        var parts = name.Split(' ', StringSplitOptions.RemoveEmptyEntries);
+        return parts.Length >= 2
+            ? $"{parts[0][0]}{parts[1][0]}".ToUpper()
+            : name.Length > 0 ? name[0].ToString().ToUpper() : "?";
+    }
+
+    private static string TimeAgo(DateTime dt)
+    {
+        var diff = DateTime.UtcNow - dt;
+        if (diff.TotalMinutes < 1)  return "только что";
+        if (diff.TotalHours < 1)    return $"{(int)diff.TotalMinutes} мин назад";
+        if (diff.TotalDays < 1)     return $"{(int)diff.TotalHours} ч назад";
+        if (diff.TotalDays < 30)    return $"{(int)diff.TotalDays} д назад";
+        return dt.ToLocalTime().ToString("dd.MM.yyyy");
+    }
+
+    private static string ActionIcon(string action) => action.ToLower() switch
+    {
+        var a when a.Contains("создан") || a.Contains("create") => "fa-plus",
+        var a when a.Contains("удал")   || a.Contains("delete") => "fa-trash-can",
+        var a when a.Contains("редакт") || a.Contains("update") => "fa-pen",
+        var a when a.Contains("загруз") || a.Contains("upload") => "fa-file-arrow-up",
+        var a when a.Contains("вход")   || a.Contains("login")  => "fa-right-to-bracket",
+        _ => "fa-circle-dot",
+    };
+
+    private static string ActionIconStyle(string action) => action.ToLower() switch
+    {
+        var a when a.Contains("удал")   || a.Contains("delete") => "background:#fef2f2;color:#dc2626;",
+        var a when a.Contains("создан") || a.Contains("create") => "background:#f0fdf4;color:#16a34a;",
+        _ => "background:#eff6ff;color:#2563eb;",
+    };
+}

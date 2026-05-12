@@ -15,17 +15,8 @@
         display: flex; align-items: center; justify-content: center;
         flex-shrink: 0;
     }
-    .tn-nav-brand-text {
-        font-size: 15px;
-        font-weight: 700;
-        color: #fff;
-        letter-spacing: -.2px;
-    }
-    .tn-nav-brand-sub {
-        font-size: 11px;
-        color: rgba(255,255,255,.40);
-        line-height: 1.2;
-    }
+    .tn-nav-brand-text { font-size: 15px; font-weight: 700; color: #fff; letter-spacing: -.2px; }
+    .tn-nav-brand-sub  { font-size: 11px; color: rgba(255,255,255,.40); line-height: 1.2; }
 
     .tn-nav-section {
         padding: 12px 12px 4px;
@@ -49,29 +40,18 @@
         font-weight: 500;
         transition: background .12s, color .12s;
     }
-    .tn-nav-link:hover {
-        background: rgba(255,255,255,.08);
-        color: #fff;
-        text-decoration: none;
-    }
-    .tn-nav-link.active {
-        background: rgba(37,99,235,.35);
-        color: #fff;
-    }
-    .tn-nav-link i {
-        width: 16px;
-        text-align: center;
-        font-size: 13px;
-        flex-shrink: 0;
+    .tn-nav-link:hover  { background: rgba(255,255,255,.08); color: #fff; text-decoration: none; }
+    .tn-nav-link.active { background: rgba(37,99,235,.35); color: #fff; }
+    .tn-nav-link i      { width: 16px; text-align: center; font-size: 13px; flex-shrink: 0; }
+
+    .tn-nav-bottom {
+        margin-top: auto;
+        padding: 12px 8px 16px;
+        border-top: 1px solid rgba(255,255,255,.08);
     }
 
-    /* Адаптивный тоггл */
-    .tn-nav-toggle {
-        display: none;
-    }
     @@media (max-width: 768px) {
-        .tn-nav-toggle { display: block; padding: 8px 16px; }
-        .tn-nav-links   { display: none; }
+        .tn-nav-links { display: none; }
         .tn-nav-links.open { display: block; }
     }
 </style>
@@ -86,64 +66,62 @@
     </div>
 </a>
 
-<div class="tn-nav-links" id="tn-nav-links">
+<div class="tn-nav-links" id="tn-nav-links" style="display:flex;flex-direction:column;flex:1;">
 
-    <div class="tn-nav-section">Главное</div>
+    <div class="tn-nav-section">Навигация</div>
 
     <NavLink class="tn-nav-link" href="/" Match="NavLinkMatch.All">
         <i class="fa-solid fa-house"></i>
         Главная
     </NavLink>
 
-    <div class="tn-nav-section">Справочники</div>
-
-    <NavLink class="tn-nav-link" href="/products">
-        <i class="fa-solid fa-box"></i>
-        Изделия
-    </NavLink>
-
-    <NavLink class="tn-nav-link" href="/operations">
-        <i class="fa-solid fa-list-check"></i>
-        Операции
-    </NavLink>
-
-    <NavLink class="tn-nav-link" href="/resources">
-        <i class="fa-solid fa-screwdriver-wrench"></i>
-        Ресурсы
-    </NavLink>
-
-    <NavLink class="tn-nav-link" href="/materials">
-        <i class="fa-solid fa-cubes"></i>
-        Материалы
-    </NavLink>
-
-    <div class="tn-nav-section">НСИ</div>
-
-    <NavLink class="tn-nav-link" href="/routes">
-        <i class="fa-solid fa-route"></i>
-        Маршрутные карты
-    </NavLink>
-
-    <NavLink class="tn-nav-link" href="/time-norms">
-        <i class="fa-solid fa-clock"></i>
-        Нормы времени
-    </NavLink>
-
-    <NavLink class="tn-nav-link" href="/material-norms">
-        <i class="fa-solid fa-scale-balanced"></i>
-        Нормы расхода
-    </NavLink>
-
-    <div class="tn-nav-section">Загрузка событий</div>
-
     <NavLink class="tn-nav-link" href="/events">
         <i class="fa-solid fa-bolt"></i>
         Журнал событий
     </NavLink>
 
-    <NavLink class="tn-nav-link" href="/documents">
+    <NavLink class="tn-nav-link" href="/import">
         <i class="fa-solid fa-file-arrow-up"></i>
-        Документы
+        Загрузка файлов
     </NavLink>
+
+    <NavLink class="tn-nav-link" href="/nsi">
+        <i class="fa-solid fa-diagram-project"></i>
+        НСИ
+    </NavLink>
+
+    <NavLink class="tn-nav-link" href="/journal">
+        <i class="fa-solid fa-clock-rotate-left"></i>
+        История
+    </NavLink>
+
+    <AuthorizeView Roles="admin">
+        <Authorized>
+            <div class="tn-nav-section" style="margin-top:8px;">Администрирование</div>
+
+            <NavLink class="tn-nav-link" href="/admin/users">
+                <i class="fa-solid fa-users"></i>
+                Пользователи
+            </NavLink>
+
+            <NavLink class="tn-nav-link" href="/admin/refs">
+                <i class="fa-solid fa-book"></i>
+                Справочники
+            </NavLink>
+        </Authorized>
+    </AuthorizeView>
+
+    <div style="flex:1;"></div>
+
+    <div class="tn-nav-bottom">
+        <NavLink class="tn-nav-link" href="/profile">
+            <i class="fa-regular fa-circle-user"></i>
+            Профиль
+        </NavLink>
+        <a class="tn-nav-link" href="/logout">
+            <i class="fa-solid fa-right-from-bracket"></i>
+            Выход
+        </a>
+    </div>
 
 </div>

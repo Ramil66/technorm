@@ -1,45 +1,45 @@
 @inherits LayoutComponentBase
 
 <div class="page">
-    <div class="sidebar">
+    <div class="sidebar" style="display:flex;flex-direction:column;">
         <NavMenu />
     </div>
 
     <main>
         <div class="top-row">
-            
-            <span></span>
+            <span style="font-size:13px;color:var(--tn-text-muted);">
+                <i class="fa-solid fa-building-columns" style="margin-right:6px;opacity:.5;"></i>
+                Система нормирования производства
+            </span>
 
             <AuthorizeView>
                 <Authorized>
-                    <div style="display:flex;align-items:center;gap:12px;margin-left:auto;">
+                    <div style="display:flex;align-items:center;gap:10px;margin-left:auto;">
 
                         <AuthorizeView Roles="admin">
                             <Authorized Context="_">
-                                <span style="font-size:11px;font-weight:600;background:#eff6ff;color:#1d4ed8;padding:3px 8px;border-radius:20px;">
+                                <span class="badge-status badge-new" style="font-size:11px;">
+                                    <i class="fa-solid fa-shield-halved" style="font-size:10px;"></i>
                                     Администратор
                                 </span>
                             </Authorized>
                             <NotAuthorized Context="_">
-                                <span style="font-size:11px;font-weight:600;background:#f0fdf4;color:#166534;padding:3px 8px;border-radius:20px;">
+                                <span class="badge-status badge-published" style="font-size:11px;">
+                                    <i class="fa-solid fa-user-gear" style="font-size:10px;"></i>
                                     Технолог
                                 </span>
                             </NotAuthorized>
                         </AuthorizeView>
 
-                        <span style="font-size:13px;color:#374151;font-weight:500;">
-                            <i class="fa-regular fa-user" style="color:#94a3b8;margin-right:5px;"></i>
+                        <a href="/profile"
+                           style="display:flex;align-items:center;gap:7px;text-decoration:none;color:var(--tn-text);font-size:13px;font-weight:500;padding:5px 10px;border:1px solid var(--tn-border);border-radius:6px;transition:all .15s;"
+                           onmouseover="this.style.borderColor='#93c5fd'"
+                           onmouseout="this.style.borderColor='var(--tn-border)'">
+                            <i class="fa-regular fa-circle-user" style="color:#94a3b8;font-size:15px;"></i>
                             @(context.User.Claims.FirstOrDefault(c => c.Type == "FullName")?.Value
                               ?? context.User.Identity?.Name)
-                        </span>
-
-                        <a href="/logout"
-                           style="font-size:13px;color:#64748b;text-decoration:none;display:flex;align-items:center;gap:5px;padding:5px 10px;border:1px solid #e2e8f0;border-radius:6px;transition:all .15s;"
-                           onmouseover="this.style.borderColor='#fca5a5';this.style.color='#dc2626'"
-                           onmouseout="this.style.borderColor='#e2e8f0';this.style.color='#64748b'">
-                            <i class="fa-solid fa-right-from-bracket"></i>
-                            Выход
                         </a>
+
                     </div>
                 </Authorized>
             </AuthorizeView>

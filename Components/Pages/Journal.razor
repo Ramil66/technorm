@@ -1,0 +1,140 @@
+@page "/journal"
+@attribute [Authorize]
+@rendermode InteractiveServer
+@inject IAuditLogService AuditSvc
+
+<PageTitle>История — ТехНорм</PageTitle>
+
+<div class="page-header">
+    <h1><i class="fa-solid fa-clock-rotate-left" style="color:var(--tn-blue);margin-right:10px;font-size:18px;"></i>История действий</h1>
+    <span class="text-muted" style="font-size:13px;">@filteredLogs.Count из @allLogs.Count записей</span>
+</div>
+
+<!-- Фильтры -->
+<div class="card mb-3">
+    <div class="card-body py-2">
+        <div class="row g-2">
+            <div class="col-md-4">
+                <input class="form-control form-control-sm" placeholder="Поиск по действию..."
+                       @bind="filterSearch" @bind:after="ApplyFilter" />
+            </div>
+            <div class="col-md-4">
+                <select class="form-select form-select-sm" @bind="filterEntity" @bind:after="ApplyFilter">
+                    <option value="">Все объекты</option>
+                    @foreach (var entity in entityTypes)
+                    {
+                        <option value="@entity">@entity</option>
+                    }
+                </select>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Таблица -->
+<div class="card">
+    <div class="card-body p-0">
+        @if (!filteredLogs.Any())
+        {
+            <div class="empty-state">
+                <i class="fa-solid fa-clock-rotate-left d-block"></i>
+                <div>Действий не найдено</div>
+            </div>
+        }
+        else
+        {
+            <div style="overflow-x:auto;">
+                <table class="table table-hover mb-0">
+                    <thead>
+                        <tr>
+                            <th style="width:36px;"></th>
+                            <th>Пользователь</th>
+                            <th>Действие</th>
+                            <th>Объект</th>
+                            <th style="white-space:nowrap;">Дата и время</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        @foreach (var log in filteredLogs)
+                        {
+                            <tr>
+                                <td>
+                                    <div class="event-icon" style="@ActionIconStyle(log.Action);width:28px;height:28px;font-size:12px;">
+                                        <i class="fa-solid @ActionIcon(log.Action)"></i>
+                                    </div>
+                                </td>
+                                <td style="font-weight:500;">@(log.User?.FullName ?? "—")</td>
+                                <td>@log.Action</td>
+                                <td>
+                                    @if (log.EntityType is not null)
+                                    {
+                                        <span class="badge-status badge-new" style="font-size:11px;">@log.EntityType</span>
+                                        @if (log.EntityId.HasValue)
+                                        {
+                                            <span class="ms-1 text-muted" style="font-size:12px;">#@log.EntityId</span>
+                                        }
+                                    }
+                                    else
+                                    {
+                                        <span class="text-muted">—</span>
+                                    }
+                                </td>
+                                <td style="white-space:nowrap;color:var(--tn-text-muted);font-size:13px;">
+                                    @log.CreatedAt.ToLocalTime().ToString("dd.MM.yyyy HH:mm:ss")
+                                </td>
+                            </tr>
+                        }
+                    </tbody>
+                </table>
+            </div>
+        }
+    </div>
+</div>
+
+@code {
+    private List<AuditLog> allLogs      = [];
+    private List<AuditLog> filteredLogs = [];
+    private List<string>   entityTypes  = [];
+    private string filterSearch = "";
+    private string filterEntity = "";
+
+    protected override async Task OnInitializedAsync()
+    {
+        allLogs     = await AuditSvc.GetRecentAsync(500);
+        entityTypes = allLogs
+            .Where(l => l.EntityType is not null)
+            .Select(l => l.EntityType!)
+            .Distinct()
+            .OrderBy(e => e)
+            .ToList();
+        ApplyFilter();
+    }
+
+    private void ApplyFilter()
+    {
+        filteredLogs = allLogs
+            .Where(l => string.IsNullOrEmpty(filterSearch) ||
+                        l.Action.Contains(filterSearch, StringComparison.OrdinalIgnoreCase))
+            .Where(l => string.IsNullOrEmpty(filterEntity) || l.EntityType == filterEntity)
+            .ToList();
+    }
+
+    private static string ActionIcon(string action) => action.ToLower() switch
+    {
+        var a when a.Contains("создан") || a.Contains("create") || a.Contains("добавл") => "fa-plus",
+        var a when a.Contains("удал")   || a.Contains("delete")                         => "fa-trash-can",
+        var a when a.Contains("редакт") || a.Contains("update") || a.Contains("изменен") => "fa-pen",
+        var a when a.Contains("загруз") || a.Contains("upload")                          => "fa-file-arrow-up",
+        var a when a.Contains("вход")   || a.Contains("login")                           => "fa-right-to-bracket",
+        var a when a.Contains("публик") || a.Contains("publish")                         => "fa-check-circle",
+        _ => "fa-circle-dot",
+    };
+
+    private static string ActionIconStyle(string action) => action.ToLower() switch
+    {
+        var a when a.Contains("удал")   || a.Contains("delete")  => "background:#fef2f2;color:#dc2626;",
+        var a when a.Contains("создан") || a.Contains("create") || a.Contains("добавл") => "background:#f0fdf4;color:#16a34a;",
+        var a when a.Contains("публик") || a.Contains("publish") => "background:#fef9c3;color:#ca8a04;",
+        _ => "background:#eff6ff;color:#2563eb;",
+    };
+}

@@ -7,6 +7,7 @@ namespace TechNormBlazor.Services;
 public interface IProductService
 {
     Task<List<Product>> GetAllAsync();
+    Task<List<Product>> GetAllWithRoutesAsync();
     Task<Product?> GetByIdAsync(int id);
     Task<List<Product>> GetByTypeAsync(string type);
     Task<Product> CreateAsync(Product product);
@@ -20,6 +21,15 @@ public class ProductService(IDbContextFactory<TechNormDbContext> factory) : IPro
     {
         using var db = await factory.CreateDbContextAsync();
         return await db.Products.OrderBy(p => p.Name).ToListAsync();
+    }
+
+    public async Task<List<Product>> GetAllWithRoutesAsync()
+    {
+        using var db = await factory.CreateDbContextAsync();
+        return await db.Products
+            .Include(p => p.TechRoutes)
+            .OrderBy(p => p.Name)
+            .ToListAsync();
     }
 
     public async Task<Product?> GetByIdAsync(int id)

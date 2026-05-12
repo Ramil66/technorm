@@ -1,0 +1,533 @@
+@page "/events"
+@attribute [Authorize]
+@rendermode InteractiveServer
+@inject IEventLogService EventSvc
+@inject IProductService ProductSvc
+@inject IOperationService OperationSvc
+@inject IResourceService ResourceSvc
+
+<PageTitle>Журнал событий — ТехНорм</PageTitle>
+
+<div class="page-header">
+    <h1><i class="fa-solid fa-bolt" style="color:var(--tn-blue);margin-right:10px;font-size:18px;"></i>Журнал событий</h1>
+    <span class="text-muted" style="font-size:13px;">@filteredEvents.Count из @allEvents.Count записей</span>
+</div>
+
+<AuthorizeView Roles="technologist">
+    <Authorized>
+        <!-- Форма добавления -->
+        <div class="card mb-4">
+            <div class="card-header" style="cursor:pointer;" @onclick="ToggleForm">
+                <i class="fa-solid fa-plus" style="color:var(--tn-blue);margin-right:6px;"></i>
+                Добавить событие
+                <i class="fa-solid @(showForm ? "fa-chevron-up" : "fa-chevron-down")" style="float:right;color:var(--tn-text-muted);"></i>
+            </div>
+            @if (showForm)
+            {
+                <div class="card-body">
+                    <div class="row g-3">
+                        <div class="col-md-4">
+                            <label class="form-label">Изделие</label>
+                            <select class="form-select" @bind="form.ProductId">
+                                <option value="">— не выбрано —</option>
+                                @foreach (var p in products)
+                                {
+                                    <option value="@p.Id">@p.Name</option>
+                                }
+                            </select>
+                        </div>
+                        <div class="col-md-4">
+                            <label class="form-label">ID дела</label>
+                            <input class="form-control" placeholder="case-001" @bind="form.CaseId" />
+                        </div>
+                        <div class="col-md-4">
+                            <label class="form-label">Операция из справочника</label>
+                            <select class="form-select" @bind="form.OperationId" @bind:after="FillActivity">
+                                <option value="">— не выбрано —</option>
+                                @foreach (var op in operations)
+                                {
+                                    <option value="@op.Id">@op.Name</option>
+                                }
+                            </select>
+                        </div>
+                        <div class="col-md-6">
+                            <label class="form-label">Наименование операции</label>
+                            <input class="form-control" placeholder="Введите название операции" @bind="form.Activity" />
+                        </div>
+                        <div class="col-md-3">
+                            <label class="form-label">Дата и время</label>
+                            <input type="datetime-local" class="form-control" @bind="form.Timestamp" />
+                        </div>
+                        <div class="col-md-3">
+                            <label class="form-label">Смена</label>
+                            <select class="form-select" @bind="form.Shift">
+                                <option value="1">Смена 1</option>
+                                <option value="2">Смена 2</option>
+                                <option value="3">Смена 3</option>
+                            </select>
+                        </div>
+                        <div class="col-md-4">
+                            <label class="form-label">Ресурс / Оборудование</label>
+                            <select class="form-select" @bind="form.ResourceId">
+                                <option value="">— не выбрано —</option>
+                                @foreach (var r in resources)
+                                {
+                                    <option value="@r.Id">@r.Name</option>
+                                }
+                            </select>
+                        </div>
+                        <div class="col-md-4">
+                            <label class="form-label">Длительность (мин)</label>
+                            <input type="number" class="form-control" min="0" step="0.5" @bind="form.DurationMinutes" />
+                        </div>
+                        <div class="col-md-4">
+                            <label class="form-label">Количество (шт)</label>
+                            <input type="number" class="form-control" min="0" @bind="form.Quantity" />
+                        </div>
+                        <div class="col-12">
+                            <label class="form-label">Примечания</label>
+                            <textarea class="form-control" rows="2" placeholder="Необязательно" @bind="form.Notes"></textarea>
+                        </div>
+                    </div>
+                    @if (formError is not null)
+                    {
+                        <div class="alert alert-danger mt-3 mb-0 py-2" style="font-size:13px;">@formError</div>
+                    }
+                    <div class="d-flex gap-2 mt-3">
+                        <button class="btn btn-primary" @onclick="SaveEvent">
+                            <i class="fa-solid fa-floppy-disk me-1"></i>Записать
+                        </button>
+                        <button class="btn btn-outline-secondary" @onclick="ResetForm">
+                            <i class="fa-solid fa-rotate-left me-1"></i>Сбросить
+                        </button>
+                    </div>
+                </div>
+            }
+        </div>
+    </Authorized>
+</AuthorizeView>
+
+<!-- Фильтры -->
+<div class="card mb-3">
+    <div class="card-body py-2">
+        <div class="row g-2 align-items-end">
+            <div class="col-md-4">
+                <label class="form-label mb-1">Изделие</label>
+                <select class="form-select form-select-sm" @bind="filterProductId" @bind:after="ApplyFilter">
+                    <option value="0">Все изделия</option>
+                    @foreach (var p in products)
+                    {
+                        <option value="@p.Id">@p.Name</option>
+                    }
+                </select>
+            </div>
+            <div class="col-md-4">
+                <label class="form-label mb-1">Источник</label>
+                <select class="form-select form-select-sm" @bind="filterSource" @bind:after="ApplyFilter">
+                    <option value="">Все источники</option>
+                    <option value="manual">Вручную</option>
+                    <option value="document">Из документа</option>
+                </select>
+            </div>
+            <div class="col-md-4">
+                <input class="form-control form-control-sm" placeholder="Поиск по операции..." @bind="filterSearch" @bind:after="ApplyFilter" />
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Таблица -->
+<div class="card">
+    <div class="card-body p-0">
+        @if (!filteredEvents.Any())
+        {
+            <div class="empty-state">
+                <i class="fa-solid fa-bolt d-block"></i>
+                <div>Событий не найдено</div>
+            </div>
+        }
+        else
+        {
+            <div style="overflow-x:auto;">
+                <table class="table table-hover mb-0">
+                    <thead>
+                        <tr>
+                            <th>ID дела</th>
+                            <th>Операция</th>
+                            <th>Дата / Смена</th>
+                            <th>Ресурс</th>
+                            <th>Изделие</th>
+                            <th>Длит., мин</th>
+                            <th>Кол-во</th>
+                            <th>Источник</th>
+                            <th></th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        @foreach (var e in filteredEvents)
+                        {
+                            <tr>
+                                <td style="font-family:monospace;font-size:12px;">@e.CaseId</td>
+                                <td style="max-width:180px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;" title="@e.Activity">@e.Activity</td>
+                                <td style="white-space:nowrap;">
+                                    @e.Timestamp.ToString("dd.MM.yy HH:mm")
+                                    @{ var shift = GetMeta(e, "Shift"); }
+                                    @if (shift is not null)
+                                    {
+                                        <span class="ms-1 badge-status badge-new" style="font-size:11px;">С@shift</span>
+                                    }
+                                </td>
+                                <td>@(e.Resource?.Name ?? "—")</td>
+                                <td>@(e.Product?.Name ?? "—")</td>
+                                <td>@(e.Duration.HasValue ? Math.Round(e.Duration.Value.TotalMinutes, 1).ToString() : "—")</td>
+                                <td>@(GetMeta(e, "Quantity") ?? "—")</td>
+                                <td>
+                                    <span class="badge-status @(e.Source == "manual" ? "badge-new" : "badge-processed")" style="font-size:11px;">
+                                        @(e.Source == "manual" ? "Вручную" : "Документ")
+                                    </span>
+                                </td>
+                                <td style="white-space:nowrap;">
+                                    <AuthorizeView Roles="technologist">
+                                        <Authorized>
+                                            <button class="btn btn-sm btn-outline-secondary py-0 px-2 me-1"
+                                                    title="Редактировать" @onclick="() => OpenEditModal(e)">
+                                                <i class="fa-solid fa-pen"></i>
+                                            </button>
+                                        </Authorized>
+                                    </AuthorizeView>
+                                    <AuthorizeView Roles="technologist">
+                                        <Authorized>
+                                            <button class="btn btn-sm btn-outline-danger py-0 px-2"
+                                                    title="Удалить" @onclick="() => AskDeleteEvent(e.Id)">
+                                                <i class="fa-solid fa-trash-can"></i>
+                                            </button>
+                                        </Authorized>
+                                    </AuthorizeView>
+                                </td>
+                            </tr>
+                        }
+                    </tbody>
+                </table>
+            </div>
+        }
+    </div>
+</div>
+
+<!-- ── Модалка редактирования ── -->
+@if (showEditModal && editingEvent is not null)
+{
+    <div class="tn-backdrop" @onclick="CloseEditModal">
+        <div class="tn-modal" @onclick:stopPropagation style="max-width:680px;">
+            <div class="tn-modal-header">
+                <h5><i class="fa-solid fa-pen" style="color:var(--tn-blue);margin-right:8px;"></i>Редактировать событие</h5>
+                <button class="btn-close" @onclick="CloseEditModal"></button>
+            </div>
+            <div class="row g-3 mt-1">
+                <div class="col-md-4">
+                    <label class="form-label">Изделие</label>
+                    <select class="form-select" value="@editingEvent.ProductId"
+                            @onchange="e => editingEvent.ProductId = int.TryParse(e.Value?.ToString(), out var v) && v > 0 ? v : null">
+                        <option value="">— не выбрано —</option>
+                        @foreach (var p in products)
+                        {
+                            <option value="@p.Id" selected="@(editingEvent.ProductId == p.Id)">@p.Name</option>
+                        }
+                    </select>
+                </div>
+                <div class="col-md-4">
+                    <label class="form-label">ID дела</label>
+                    <input class="form-control" value="@editingEvent.CaseId"
+                           @onchange="e => editingEvent.CaseId = e.Value?.ToString() ?? string.Empty" />
+                </div>
+                <div class="col-md-4">
+                    <label class="form-label">Смена</label>
+                    <select class="form-select" value="@editShift"
+                            @onchange="e => editShift = int.TryParse(e.Value?.ToString(), out var s) ? s : 1">
+                        <option value="1">Смена 1</option>
+                        <option value="2">Смена 2</option>
+                        <option value="3">Смена 3</option>
+                    </select>
+                </div>
+                <div class="col-md-8">
+                    <label class="form-label">Наименование операции</label>
+                    <input class="form-control" value="@editingEvent.Activity"
+                           @onchange="e => editingEvent.Activity = e.Value?.ToString() ?? string.Empty" />
+                </div>
+                <div class="col-md-4">
+                    <label class="form-label">Дата и время</label>
+                    <input type="datetime-local" class="form-control"
+                           value="@editingEvent.Timestamp.ToLocalTime().ToString("yyyy-MM-ddTHH:mm")"
+                           @onchange="e => { if (DateTime.TryParse(e.Value?.ToString(), out var dt)) editingEvent.Timestamp = dt.ToUniversalTime(); }" />
+                </div>
+                <div class="col-md-4">
+                    <label class="form-label">Ресурс / Оборудование</label>
+                    <select class="form-select" value="@editingEvent.ResourceId"
+                            @onchange="e => editingEvent.ResourceId = int.TryParse(e.Value?.ToString(), out var v) && v > 0 ? v : null">
+                        <option value="">— не выбрано —</option>
+                        @foreach (var r in resources)
+                        {
+                            <option value="@r.Id" selected="@(editingEvent.ResourceId == r.Id)">@r.Name</option>
+                        }
+                    </select>
+                </div>
+                <div class="col-md-4">
+                    <label class="form-label">Длительность (мин)</label>
+                    <input type="number" class="form-control" min="0" step="0.5"
+                           value="@(editingEvent.Duration.HasValue ? Math.Round(editingEvent.Duration.Value.TotalMinutes, 1).ToString(System.Globalization.CultureInfo.InvariantCulture) : "")"
+                           @onchange="e => editingEvent.Duration = double.TryParse(e.Value?.ToString(), System.Globalization.NumberStyles.Any, System.Globalization.CultureInfo.InvariantCulture, out var d) && d > 0 ? TimeSpan.FromMinutes(d) : null" />
+                </div>
+                <div class="col-md-4">
+                    <label class="form-label">Количество (шт)</label>
+                    <input type="number" class="form-control" min="1"
+                           value="@editQty"
+                           @onchange="e => editQty = int.TryParse(e.Value?.ToString(), out var q) && q > 0 ? q : 1" />
+                </div>
+            </div>
+            @if (editError is not null)
+            {
+                <div class="alert alert-danger mt-3 mb-0 py-2" style="font-size:13px;">@editError</div>
+            }
+            <div class="tn-modal-footer">
+                <button class="btn btn-outline-secondary" @onclick="CloseEditModal">Отмена</button>
+                <button class="btn btn-primary" @onclick="SaveEditEvent" disabled="@isSavingEdit">
+                    @if (isSavingEdit) { <span class="spinner-border spinner-border-sm me-1" role="status"></span> }
+                    <i class="fa-solid fa-floppy-disk me-1"></i>Сохранить
+                </button>
+            </div>
+        </div>
+    </div>
+}
+
+<!-- ── Подтверждение удаления ── -->
+@if (showDeleteConfirm)
+{
+    <div class="tn-backdrop" @onclick="CancelDelete">
+        <div class="tn-modal" @onclick:stopPropagation style="max-width:360px;text-align:center;padding:32px 28px;">
+            <div style="font-size:44px;margin-bottom:16px;color:#dc2626;">
+                <i class="fa-solid fa-triangle-exclamation"></i>
+            </div>
+            <div style="font-size:16px;font-weight:600;margin-bottom:8px;">Удалить событие?</div>
+            <div style="font-size:13px;color:var(--tn-text-muted);margin-bottom:24px;">
+                Это действие нельзя отменить.
+            </div>
+            <div class="d-flex gap-2 justify-content-center">
+                <button class="btn btn-outline-secondary" @onclick="CancelDelete">Отмена</button>
+                <button class="btn btn-danger" @onclick="ConfirmDelete">
+                    <i class="fa-solid fa-trash-can me-1"></i>Удалить
+                </button>
+            </div>
+        </div>
+    </div>
+}
+
+@code {
+    [CascadingParameter] private Task<AuthenticationState> AuthStateTask { get; set; } = default!;
+
+    private List<EventLog>  allEvents      = [];
+    private List<EventLog>  filteredEvents = [];
+    private List<Product>   products       = [];
+    private List<Operation> operations     = [];
+    private List<Resource>  resources      = [];
+
+    private bool   showForm    = false;
+    private string? formError  = null;
+    private int    filterProductId = 0;
+    private string filterSource    = "";
+    private string filterSearch    = "";
+
+    private EventForm form = new();
+    private int currentUserId;
+
+    // Edit modal
+    private bool      showEditModal = false;
+    private EventLog? editingEvent;
+    private string?   editError;
+    private bool      isSavingEdit;
+    private int       editShift = 1;
+    private int       editQty   = 1;
+
+    // Delete confirm modal
+    private bool showDeleteConfirm = false;
+    private long pendingDeleteId   = 0;
+
+    private class EventForm
+    {
+        public int?    ProductId       { get; set; }
+        public string  CaseId          { get; set; } = "";
+        public int?    OperationId     { get; set; }
+        public string  Activity        { get; set; } = "";
+        public DateTime Timestamp      { get; set; } = DateTime.Now;
+        public int     Shift           { get; set; } = 1;
+        public int?    ResourceId      { get; set; }
+        public double? DurationMinutes { get; set; }
+        public int?    Quantity        { get; set; }
+        public string? Notes           { get; set; }
+    }
+
+    protected override async Task OnInitializedAsync()
+    {
+        var state = await AuthStateTask;
+        currentUserId = int.Parse(state.User.FindFirst("UserId")?.Value ?? "0");
+
+        var t1 = EventSvc.GetAllAsync();
+        var t2 = ProductSvc.GetAllAsync();
+        var t3 = OperationSvc.GetAllAsync();
+        var t4 = ResourceSvc.GetAllAsync();
+        await Task.WhenAll(t1, t2, t3, t4);
+
+        allEvents  = t1.Result;
+        products   = t2.Result;
+        operations = t3.Result;
+        resources  = t4.Result;
+        ApplyFilter();
+    }
+
+    private void ApplyFilter()
+    {
+        filteredEvents = allEvents
+            .Where(e => filterProductId == 0 || e.ProductId == filterProductId)
+            .Where(e => string.IsNullOrEmpty(filterSource) || e.Source == filterSource)
+            .Where(e => string.IsNullOrEmpty(filterSearch) ||
+                        e.Activity.Contains(filterSearch, StringComparison.OrdinalIgnoreCase))
+            .ToList();
+    }
+
+    private void FillActivity()
+    {
+        if (form.OperationId.HasValue)
+        {
+            var op = operations.FirstOrDefault(o => o.Id == form.OperationId.Value);
+            if (op is not null && string.IsNullOrEmpty(form.Activity))
+                form.Activity = op.Name;
+        }
+    }
+
+    private async Task SaveEvent()
+    {
+        formError = null;
+        if (string.IsNullOrWhiteSpace(form.Activity))  { formError = "Введите наименование операции."; return; }
+        if (string.IsNullOrWhiteSpace(form.CaseId))    { formError = "Введите ID дела."; return; }
+
+        var meta = new { Shift = form.Shift, Quantity = form.Quantity, Notes = form.Notes, OperationId = form.OperationId };
+        var metaJson = JsonDocument.Parse(JsonSerializer.Serialize(meta));
+
+        var ev = new EventLog
+        {
+            CaseId     = form.CaseId.Trim(),
+            Activity   = form.Activity.Trim(),
+            Timestamp  = form.Timestamp.ToUniversalTime(),
+            ProductId  = form.ProductId,
+            ResourceId = form.ResourceId,
+            Duration   = form.DurationMinutes.HasValue ? TimeSpan.FromMinutes(form.DurationMinutes.Value) : null,
+            Source     = "manual",
+            CreatedBy  = currentUserId,
+            Metadata   = metaJson,
+        };
+
+        var created = await EventSvc.CreateAsync(ev);
+        EnrichLocal(created);
+        allEvents.Insert(0, created);
+        ApplyFilter();
+        ResetForm();
+        showForm = false;
+    }
+
+    // ── Edit ─────────────────────────────────────────────────────────────────
+    private void OpenEditModal(EventLog e)
+    {
+        editingEvent = new EventLog
+        {
+            Id         = e.Id,
+            CaseId     = e.CaseId,
+            Activity   = e.Activity,
+            Timestamp  = e.Timestamp,
+            ProductId  = e.ProductId,
+            ResourceId = e.ResourceId,
+            Duration   = e.Duration,
+            Source     = e.Source,
+            Metadata   = e.Metadata,
+            Product    = e.Product,
+            Resource   = e.Resource,
+        };
+        editShift    = int.TryParse(GetMeta(e, "Shift"),    out var s) ? s : 1;
+        editQty      = int.TryParse(GetMeta(e, "Quantity"), out var q) ? q : 1;
+        editError    = null;
+        isSavingEdit = false;
+        showEditModal = true;
+    }
+
+    private void CloseEditModal() { showEditModal = false; editingEvent = null; }
+
+    private async Task SaveEditEvent()
+    {
+        if (editingEvent is null) return;
+        editError = null;
+        if (string.IsNullOrWhiteSpace(editingEvent.Activity)) { editError = "Введите наименование операции."; return; }
+        if (string.IsNullOrWhiteSpace(editingEvent.CaseId))   { editError = "Введите ID дела."; return; }
+
+        isSavingEdit = true;
+        try
+        {
+            var meta = new { Shift = editShift, Quantity = editQty, OperationId = (int?)null };
+            editingEvent.Metadata = JsonDocument.Parse(JsonSerializer.Serialize(meta));
+            await EventSvc.UpdateAsync(editingEvent);
+
+            var local = allEvents.FirstOrDefault(e => e.Id == editingEvent.Id);
+            if (local is not null)
+            {
+                local.CaseId     = editingEvent.CaseId;
+                local.Activity   = editingEvent.Activity;
+                local.Timestamp  = editingEvent.Timestamp;
+                local.ProductId  = editingEvent.ProductId;
+                local.ResourceId = editingEvent.ResourceId;
+                local.Duration   = editingEvent.Duration;
+                local.Metadata   = editingEvent.Metadata;
+                local.Product    = products.FirstOrDefault(p => p.Id == editingEvent.ProductId);
+                local.Resource   = resources.FirstOrDefault(r => r.Id == editingEvent.ResourceId);
+            }
+            ApplyFilter();
+            CloseEditModal();
+        }
+        finally { isSavingEdit = false; }
+    }
+
+    // ── Delete ────────────────────────────────────────────────────────────────
+    private void AskDeleteEvent(long id)
+    {
+        pendingDeleteId  = id;
+        showDeleteConfirm = true;
+    }
+
+    private void CancelDelete()
+    {
+        showDeleteConfirm = false;
+        pendingDeleteId   = 0;
+    }
+
+    private async Task ConfirmDelete()
+    {
+        showDeleteConfirm = false;
+        await EventSvc.DeleteAsync(pendingDeleteId);
+        allEvents.RemoveAll(e => e.Id == pendingDeleteId);
+        pendingDeleteId = 0;
+        ApplyFilter();
+    }
+
+    // ── Helpers ───────────────────────────────────────────────────────────────
+    private void EnrichLocal(EventLog e)
+    {
+        if (e.ProductId.HasValue)  e.Product  = products.FirstOrDefault(p => p.Id == e.ProductId.Value);
+        if (e.ResourceId.HasValue) e.Resource = resources.FirstOrDefault(r => r.Id == e.ResourceId.Value);
+    }
+
+    private void ResetForm() => form = new EventForm();
+    private void ToggleForm() => showForm = !showForm;
+
+    private static string? GetMeta(EventLog e, string key)
+    {
+        if (e.Metadata is null) return null;
+        if (e.Metadata.RootElement.TryGetProperty(key, out var val))
+            return val.ToString();
+        return null;
+    }
+}

@@ -1,0 +1,326 @@
+@page "/admin/users"
+@attribute [Authorize(Roles = "admin")]
+@rendermode InteractiveServer
+@inject IUserService UserSvc
+
+<PageTitle>Пользователи — ТехНорм</PageTitle>
+
+<div class="page-header">
+    <h1><i class="fa-solid fa-users" style="color:var(--tn-blue);margin-right:10px;font-size:18px;"></i>Пользователи</h1>
+    <button class="btn btn-primary btn-sm" @onclick="ShowAddModal">
+        <i class="fa-solid fa-plus me-1"></i>Добавить
+    </button>
+</div>
+
+<!-- Поиск -->
+<div class="mb-3">
+    <input class="form-control" style="max-width:320px;" placeholder="Поиск по имени или логину..."
+           @bind="searchQuery" @bind:after="FilterUsers" />
+</div>
+
+<!-- Таблица -->
+<div class="card">
+    <div class="card-body p-0">
+        @if (!filteredUsers.Any())
+        {
+            <div class="empty-state">
+                <i class="fa-solid fa-users d-block"></i>
+                <div>Пользователи не найдены</div>
+            </div>
+        }
+        else
+        {
+            <table class="table table-hover mb-0">
+                <thead>
+                    <tr>
+                        <th>Пользователь</th>
+                        <th>Логин</th>
+                        <th>Роль</th>
+                        <th>Email</th>
+                        <th>Дата регистрации</th>
+                        <th>Статус</th>
+                        <th></th>
+                    </tr>
+                </thead>
+                <tbody>
+                    @foreach (var u in filteredUsers)
+                    {
+                        <tr>
+                            <td>
+                                <div class="d-flex align-items-center gap-2">
+                                    <div style="width:34px;height:34px;border-radius:50%;
+                                                background:@(u.Role == "admin" ? "#7c3aed" : "var(--tn-blue)");
+                                                color:#fff;display:flex;align-items:center;justify-content:center;
+                                                font-size:13px;font-weight:700;flex-shrink:0;">
+                                        @GetInitials(u.FullName)
+                                    </div>
+                                    <span style="font-weight:500;font-size:13px;">@u.FullName</span>
+                                </div>
+                            </td>
+                            <td style="font-family:monospace;font-size:12px;">@u.Username</td>
+                            <td>
+                                <span class="badge-status @(u.Role == "admin" ? "role-badge-admin" : "role-badge-tech")" style="font-size:11px;">
+                                    @(u.Role == "admin" ? "Администратор" : "Технолог")
+                                </span>
+                            </td>
+                            <td style="font-size:13px;">@(u.Email ?? "—")</td>
+                            <td style="font-size:12px;white-space:nowrap;">@u.CreatedAt.ToLocalTime().ToString("dd.MM.yyyy")</td>
+                            <td>
+                                <span class="badge-status @(u.IsActive ? "badge-published" : "badge-error")" style="font-size:11px;">
+                                    @(u.IsActive ? "Активен" : "Заблокирован")
+                                </span>
+                            </td>
+                            <td>
+                                <div class="d-flex gap-1">
+                                    <button class="btn btn-sm btn-outline-primary py-0 px-2"
+                                            title="Редактировать" @onclick="() => ShowEditModal(u)">
+                                        <i class="fa-solid fa-pen"></i>
+                                    </button>
+                                    <button class="btn btn-sm @(u.IsActive ? "btn-outline-warning" : "btn-outline-success") py-0 px-2"
+                                            title="@(u.IsActive ? "Заблокировать" : "Разблокировать")"
+                                            @onclick="() => AskToggleActive(u)">
+                                        <i class="fa-solid @(u.IsActive ? "fa-ban" : "fa-circle-check")"></i>
+                                    </button>
+                                    <button class="btn btn-sm btn-outline-danger py-0 px-2"
+                                            title="Удалить" @onclick="() => AskDeleteUser(u)">
+                                        <i class="fa-solid fa-trash-can"></i>
+                                    </button>
+                                </div>
+                            </td>
+                        </tr>
+                    }
+                </tbody>
+            </table>
+        }
+    </div>
+</div>
+
+<!-- ── Модалка добавления / редактирования ── -->
+@if (showModal)
+{
+    <div class="tn-backdrop" @onclick="CloseModal">
+        <div class="tn-modal" @onclick:stopPropagation>
+            <div class="tn-modal-header">
+                <h5>@(editingUser is null ? "Добавить пользователя" : "Редактировать пользователя")</h5>
+                <button class="btn-close" @onclick="CloseModal"></button>
+            </div>
+
+            @if (editingUser is null)
+            {
+                <div class="mb-3">
+                    <label class="form-label">Логин</label>
+                    <input class="form-control" @bind="form.Username" placeholder="login123" />
+                </div>
+            }
+            <div class="mb-3">
+                <label class="form-label">ФИО</label>
+                <input class="form-control" @bind="form.FullName" placeholder="Иванов Иван Иванович" />
+            </div>
+            <div class="mb-3">
+                <label class="form-label">Email</label>
+                <input type="email" class="form-control" @bind="form.Email" placeholder="user@example.com" />
+            </div>
+            <div class="mb-3">
+                <label class="form-label">@(editingUser is null ? "Пароль" : "Новый пароль (оставьте пустым, чтобы не менять)")</label>
+                <input type="password" class="form-control" @bind="form.Password" autocomplete="new-password" />
+            </div>
+            <div class="mb-3">
+                <label class="form-label">Роль</label>
+                <select class="form-select" @bind="form.Role">
+                    <option value="technologist">Технолог-нормировщик</option>
+                    <option value="admin">Администратор</option>
+                </select>
+            </div>
+
+            @if (modalError is not null)
+            {
+                <div class="alert alert-danger py-2 mb-3" style="font-size:13px;">@modalError</div>
+            }
+
+            <div class="tn-modal-footer">
+                <button class="btn btn-secondary" @onclick="CloseModal">Отмена</button>
+                <button class="btn btn-primary" @onclick="SaveUser">Сохранить</button>
+            </div>
+        </div>
+    </div>
+}
+
+<!-- ── Подтверждение блокировки ── -->
+@if (toggleConfirmUser is not null)
+{
+    <div class="tn-backdrop" @onclick="CancelToggle">
+        <div class="tn-modal" @onclick:stopPropagation style="max-width:380px;text-align:center;padding:32px 28px;">
+            <div style="font-size:44px;margin-bottom:16px;color:@(toggleConfirmUser.IsActive ? "#d97706" : "#16a34a");">
+                <i class="fa-solid @(toggleConfirmUser.IsActive ? "fa-ban" : "fa-circle-check")"></i>
+            </div>
+            <div style="font-size:16px;font-weight:600;margin-bottom:8px;">
+                @(toggleConfirmUser.IsActive ? "Заблокировать пользователя?" : "Разблокировать пользователя?")
+            </div>
+            <div style="font-size:13px;color:var(--tn-text-muted);margin-bottom:24px;">
+                @toggleConfirmUser.FullName
+            </div>
+            <div class="d-flex gap-2 justify-content-center">
+                <button class="btn btn-outline-secondary" @onclick="CancelToggle">Отмена</button>
+                <button class="btn @(toggleConfirmUser.IsActive ? "btn-warning" : "btn-success")" @onclick="ConfirmToggle">
+                    <i class="fa-solid @(toggleConfirmUser.IsActive ? "fa-ban" : "fa-circle-check") me-1"></i>
+                    @(toggleConfirmUser.IsActive ? "Заблокировать" : "Разблокировать")
+                </button>
+            </div>
+        </div>
+    </div>
+}
+
+<!-- ── Подтверждение удаления ── -->
+@if (deleteConfirmUser is not null)
+{
+    <div class="tn-backdrop" @onclick="CancelDelete">
+        <div class="tn-modal" @onclick:stopPropagation style="max-width:380px;text-align:center;padding:32px 28px;">
+            <div style="font-size:44px;margin-bottom:16px;color:#dc2626;">
+                <i class="fa-solid fa-triangle-exclamation"></i>
+            </div>
+            <div style="font-size:16px;font-weight:600;margin-bottom:8px;">Удалить пользователя?</div>
+            <div style="font-size:13px;color:var(--tn-text-muted);margin-bottom:4px;">@deleteConfirmUser.FullName</div>
+            <div style="font-size:12px;color:var(--tn-text-muted);margin-bottom:24px;">Это действие нельзя отменить.</div>
+            <div class="d-flex gap-2 justify-content-center">
+                <button class="btn btn-outline-secondary" @onclick="CancelDelete">Отмена</button>
+                <button class="btn btn-danger" @onclick="ConfirmDelete">
+                    <i class="fa-solid fa-trash-can me-1"></i>Удалить
+                </button>
+            </div>
+        </div>
+    </div>
+}
+
+@code {
+    private List<User>  allUsers      = [];
+    private List<User>  filteredUsers = [];
+    private string searchQuery = "";
+    private bool   showModal  = false;
+    private User?  editingUser;
+    private string? modalError;
+
+    private User? toggleConfirmUser;
+    private User? deleteConfirmUser;
+
+    private UserForm form = new();
+
+    private class UserForm
+    {
+        public string  Username { get; set; } = "";
+        public string  FullName { get; set; } = "";
+        public string? Email    { get; set; }
+        public string? Password { get; set; }
+        public string  Role     { get; set; } = "technologist";
+    }
+
+    protected override async Task OnInitializedAsync()
+    {
+        allUsers = await UserSvc.GetAllAsync();
+        FilterUsers();
+    }
+
+    private void FilterUsers()
+    {
+        filteredUsers = string.IsNullOrEmpty(searchQuery)
+            ? [.. allUsers]
+            : allUsers.Where(u =>
+                u.FullName.Contains(searchQuery, StringComparison.OrdinalIgnoreCase) ||
+                u.Username.Contains(searchQuery, StringComparison.OrdinalIgnoreCase)).ToList();
+    }
+
+    private void ShowAddModal()
+    {
+        editingUser = null;
+        form        = new UserForm();
+        modalError  = null;
+        showModal   = true;
+    }
+
+    private void ShowEditModal(User u)
+    {
+        editingUser = u;
+        form        = new UserForm { FullName = u.FullName, Email = u.Email, Role = u.Role };
+        modalError  = null;
+        showModal   = true;
+    }
+
+    private async Task SaveUser()
+    {
+        modalError = null;
+
+        if (string.IsNullOrWhiteSpace(form.FullName)) { modalError = "Введите ФИО."; return; }
+
+        if (editingUser is null)
+        {
+            if (string.IsNullOrWhiteSpace(form.Username)) { modalError = "Введите логин."; return; }
+            if (string.IsNullOrWhiteSpace(form.Password)) { modalError = "Введите пароль."; return; }
+            if (form.Password.Length < 6)                 { modalError = "Пароль минимум 6 символов."; return; }
+
+            var user = new User
+            {
+                Username = form.Username.Trim(),
+                FullName = form.FullName.Trim(),
+                Email    = form.Email?.Trim(),
+                Role     = form.Role,
+            };
+            user = await UserSvc.CreateAsync(user, form.Password);
+            allUsers.Add(user);
+        }
+        else
+        {
+            editingUser.FullName = form.FullName.Trim();
+            editingUser.Email    = form.Email?.Trim();
+            editingUser.Role     = form.Role;
+            await UserSvc.UpdateAsync(editingUser);
+
+            if (!string.IsNullOrEmpty(form.Password))
+            {
+                if (form.Password.Length < 6) { modalError = "Пароль минимум 6 символов."; return; }
+                await UserSvc.ChangePasswordAsync(editingUser.Id, form.Password);
+            }
+        }
+
+        FilterUsers();
+        CloseModal();
+    }
+
+    // ── Toggle active ─────────────────────────────────────────────────────────
+    private void AskToggleActive(User u) => toggleConfirmUser = u;
+    private void CancelToggle()          => toggleConfirmUser = null;
+
+    private async Task ConfirmToggle()
+    {
+        if (toggleConfirmUser is null) return;
+        var u = toggleConfirmUser;
+        toggleConfirmUser = null;
+        await UserSvc.SetActiveAsync(u.Id, !u.IsActive);
+        u.IsActive = !u.IsActive;
+    }
+
+    // ── Delete ────────────────────────────────────────────────────────────────
+    private void AskDeleteUser(User u) => deleteConfirmUser = u;
+    private void CancelDelete()        => deleteConfirmUser = null;
+
+    private async Task ConfirmDelete()
+    {
+        if (deleteConfirmUser is null) return;
+        var u = deleteConfirmUser;
+        deleteConfirmUser = null;
+        await UserSvc.DeleteAsync(u.Id);
+        allUsers.Remove(u);
+        FilterUsers();
+    }
+
+    private void CloseModal()
+    {
+        showModal   = false;
+        editingUser = null;
+        modalError  = null;
+    }
+
+    private static string GetInitials(string name)
+    {
+        var p = name.Split(' ', StringSplitOptions.RemoveEmptyEntries);
+        return p.Length >= 2 ? $"{p[0][0]}{p[1][0]}".ToUpper() : (name.Length > 0 ? name[0].ToString().ToUpper() : "?");
+    }
+}

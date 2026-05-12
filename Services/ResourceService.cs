@@ -12,6 +12,7 @@ public interface IResourceService
     Task<Resource> CreateAsync(Resource resource);
     Task UpdateAsync(Resource resource);
     Task SetActiveAsync(int id, bool isActive);
+    Task DeleteAsync(int id);
 }
 
 public class ResourceService(IDbContextFactory<TechNormDbContext> factory) : IResourceService
@@ -57,5 +58,16 @@ public class ResourceService(IDbContextFactory<TechNormDbContext> factory) : IRe
         using var db = await factory.CreateDbContextAsync();
         await db.Resources.Where(r => r.Id == id)
             .ExecuteUpdateAsync(s => s.SetProperty(r => r.IsActive, isActive));
+    }
+
+    public async Task DeleteAsync(int id)
+    {
+        using var db = await factory.CreateDbContextAsync();
+        // Nullify FK references (resource_id is nullable in both tables)
+        await db.TimeNorms.Where(t => t.ResourceId == id)
+            .ExecuteUpdateAsync(s => s.SetProperty(t => t.ResourceId, (int?)null));
+        await db.EventLogs.Where(e => e.ResourceId == id)
+            .ExecuteUpdateAsync(s => s.SetProperty(e => e.ResourceId, (int?)null));
+        await db.Resources.Where(r => r.Id == id).ExecuteDeleteAsync();
     }
 }

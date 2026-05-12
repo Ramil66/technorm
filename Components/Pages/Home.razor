@@ -1,14 +1,204 @@
 @page "/"
 @attribute [Authorize]
+@rendermode InteractiveServer
+@inject IDashboardService Dashboard
+@inject IJSRuntime JS
 
 <PageTitle>Главная — ТехНорм</PageTitle>
 
-<h1>Добро пожаловать в систему ТехНорм</h1>
+@if (isLoading)
+{
+    <div class="d-flex justify-content-center py-5">
+        <div class="spinner-border text-primary" role="status"></div>
+    </div>
+}
+else
+{
+    <div class="page-header">
+        <h1><i class="fa-solid fa-house" style="color:var(--tn-blue);margin-right:10px;font-size:18px;"></i>Главная</h1>
+        <span class="text-muted" style="font-size:13px;">@DateTime.Now.ToString("dd MMMM yyyy, HH:mm")</span>
+    </div>
 
-<AuthorizeView>
-    <Authorized>
-        <p class="text-muted">
-            Вы вошли как <strong>@context.User.Claims.FirstOrDefault(c => c.Type == "FullName")?.Value</strong>.
-        </p>
-    </Authorized>
-</AuthorizeView>
+    <!-- KPI Cards -->
+    <div class="kpi-grid">
+        <a href="/events" class="kpi-card">
+            <div class="kpi-icon" style="background:#eff6ff;color:#2563eb;">
+                <i class="fa-solid fa-bolt"></i>
+            </div>
+            <div class="kpi-value">@stats!.TotalEvents</div>
+            <div class="kpi-label">Событий в журнале</div>
+        </a>
+        <a href="/events" class="kpi-card">
+            <div class="kpi-icon" style="background:#f0fdf4;color:#16a34a;">
+                <i class="fa-solid fa-calendar-day"></i>
+            </div>
+            <div class="kpi-value">@stats.TodayEvents</div>
+            <div class="kpi-label">Событий сегодня</div>
+        </a>
+        <a href="/nsi" class="kpi-card">
+            <div class="kpi-icon" style="background:#fef9c3;color:#ca8a04;">
+                <i class="fa-solid fa-route"></i>
+            </div>
+            <div class="kpi-value">@stats.ActiveRoutes</div>
+            <div class="kpi-label">Активных маршрутов</div>
+        </a>
+        <a href="/nsi" class="kpi-card">
+            <div class="kpi-icon" style="background:#fdf4ff;color:#9333ea;">
+                <i class="fa-solid fa-industry"></i>
+            </div>
+            <div class="kpi-value">@stats.ProductsInWork</div>
+            <div class="kpi-label">Изделий в работе</div>
+            <div class="kpi-sub">@stats.DocumentsProcessed документов обработано</div>
+        </a>
+    </div>
+
+    <!-- Chart + Recent Routes -->
+    <div class="row g-4 mb-4">
+        <div class="col-lg-7">
+            <div class="card h-100">
+                <div class="card-header">
+                    <i class="fa-solid fa-chart-column" style="color:var(--tn-blue);margin-right:6px;"></i>
+                    События за неделю
+                </div>
+                <div class="card-body" style="padding:16px;">
+                    <div style="height:200px;">
+                        <canvas id="weeklyChart"></canvas>
+                    </div>
+                </div>
+            </div>
+        </div>
+        <div class="col-lg-5">
+            <div class="card h-100">
+                <div class="card-header">
+                    <i class="fa-solid fa-route" style="color:var(--tn-blue);margin-right:6px;"></i>
+                    Последние маршруты
+                </div>
+                <div class="card-body p-0">
+                    @if (!recentRoutes.Any())
+                    {
+                        <div class="empty-state py-4">
+                            <i class="fa-solid fa-route d-block"></i>
+                            <div>Маршруты не найдены</div>
+                        </div>
+                    }
+                    else
+                    {
+                        <div class="list-group list-group-flush">
+                            @foreach (var r in recentRoutes)
+                            {
+                                <a href="/nsi" class="list-group-item list-group-item-action border-0 px-3 py-2">
+                                    <div class="d-flex align-items-center justify-content-between">
+                                        <div>
+                                            <div style="font-size:13px;font-weight:600;">@r.Name</div>
+                                            <div style="font-size:12px;color:var(--tn-text-muted);">
+                                                @(r.Product?.Name ?? "—") · v@(r.Version)
+                                            </div>
+                                        </div>
+                                        <span class="badge-status @StatusBadge(r.Status)" style="font-size:11px;">
+                                            @StatusLabel(r.Status)
+                                        </span>
+                                    </div>
+                                </a>
+                            }
+                        </div>
+                    }
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Recent Events -->
+    <div class="card">
+        <div class="card-header">
+            <i class="fa-solid fa-clock-rotate-left" style="color:var(--tn-blue);margin-right:6px;"></i>
+            Последние события
+        </div>
+        <div class="card-body p-0">
+            @if (!recentEvents.Any())
+            {
+                <div class="empty-state py-4">
+                    <i class="fa-solid fa-bolt d-block"></i>
+                    <div>События не найдены</div>
+                </div>
+            }
+            else
+            {
+                <div style="padding:8px 16px;">
+                    @foreach (var e in recentEvents)
+                    {
+                        <div class="event-item">
+                            <div class="event-icon" style="background:#eff6ff;color:#2563eb;">
+                                <i class="fa-solid fa-bolt"></i>
+                            </div>
+                            <div class="event-info">
+                                <div class="event-desc">@e.Activity</div>
+                                <div class="event-meta">
+                                    @(e.Product?.Name ?? "—") ·
+                                    @e.Timestamp.ToString("dd.MM.yyyy HH:mm")
+                                    @if (e.Duration.HasValue)
+                                    {
+                                        <span> · @Math.Round(e.Duration.Value.TotalMinutes, 1) мин</span>
+                                    }
+                                </div>
+                            </div>
+                            <span class="badge-status @(e.Source == "manual" ? "badge-new" : "badge-processed")" style="font-size:11px;align-self:flex-start;margin-top:2px;">
+                                @(e.Source == "manual" ? "Вручную" : "Документ")
+                            </span>
+                        </div>
+                    }
+                </div>
+            }
+        </div>
+    </div>
+}
+
+@code {
+    private bool isLoading = true;
+    private bool chartInitialized;
+    private DashboardStats? stats;
+    private List<TechRoute> recentRoutes = [];
+    private List<EventLog> recentEvents = [];
+    private int[] weeklyCounts = [];
+    private string[] weeklyLabels = [];
+
+    protected override async Task OnInitializedAsync()
+    {
+        var t1 = Dashboard.GetStatsAsync();
+        var t2 = Dashboard.GetRecentRoutesAsync(5);
+        var t3 = Dashboard.GetRecentEventsAsync(8);
+        var t4 = Dashboard.GetWeeklyCountsAsync();
+        var t5 = Dashboard.GetWeeklyLabelsAsync();
+
+        await Task.WhenAll(t1, t2, t3, t4, t5);
+
+        stats        = t1.Result;
+        recentRoutes = t2.Result;
+        recentEvents = t3.Result;
+        weeklyCounts = t4.Result;
+        weeklyLabels = t5.Result;
+        isLoading    = false;
+    }
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (!chartInitialized && !isLoading && weeklyLabels.Length > 0)
+        {
+            chartInitialized = true;
+            await JS.InvokeVoidAsync("tnInterop.initBarChart", "weeklyChart", weeklyLabels, weeklyCounts);
+        }
+    }
+
+    private static string StatusBadge(string status) => status switch
+    {
+        "published" => "badge-published",
+        "archived"  => "badge-archived",
+        _           => "badge-draft",
+    };
+
+    private static string StatusLabel(string status) => status switch
+    {
+        "published" => "Опубликован",
+        "archived"  => "Архив",
+        _           => "Черновик",
+    };
+}

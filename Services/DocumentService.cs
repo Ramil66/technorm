@@ -101,6 +101,9 @@ public class DocumentService(
         using var db = await factory.CreateDbContextAsync();
         var doc = await db.Documents.FindAsync(id);
         if (doc is null) return;
+        // Nullify FK references (NO ACTION → must clear manually)
+        await db.EventLogs.Where(e => e.SourceDocumentId == id)
+            .ExecuteUpdateAsync(s => s.SetProperty(e => e.SourceDocumentId, (int?)null));
         db.Documents.Remove(doc);
         await db.SaveChangesAsync();
         if (File.Exists(doc.FilePath))

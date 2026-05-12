@@ -181,6 +181,9 @@ public class TechRouteService(IDbContextFactory<TechNormDbContext> factory) : IT
     public async Task DeleteAsync(int id)
     {
         using var db = await factory.CreateDbContextAsync();
+        await db.CalculationHistories
+            .Where(c => c.RouteId == id)
+            .ExecuteUpdateAsync(s => s.SetProperty(c => c.RouteId, (int?)null));
         await db.TechRoutes.Where(r => r.Id == id).ExecuteDeleteAsync();
     }
 }
