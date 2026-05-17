@@ -104,12 +104,16 @@ main {
 
 /* ---------- Формы ---------- */
 
+.btn {
+    border-radius: 8px;
+}
+
 .form-control, .form-select {
     font-size: 14px;
     border-color: var(--tn-border);
     background: #fff;
     color: var(--tn-text);
-    border-radius: 6px;
+    border-radius: 8px;
     padding: 8px 12px;
 }
 .form-control:focus, .form-select:focus {
@@ -152,7 +156,7 @@ main {
 
 .card {
     border: 1px solid var(--tn-border);
-    border-radius: 10px;
+    border-radius: 12px;
     box-shadow: 0 1px 3px rgba(0,0,0,.05);
 }
 .card-header {
@@ -249,7 +253,7 @@ main {
 .kpi-card {
     background: #fff;
     border: 1px solid var(--tn-border);
-    border-radius: 10px;
+    border-radius: 12px;
     padding: 20px 20px 16px;
     display: flex;
     flex-direction: column;
@@ -267,7 +271,7 @@ a.kpi-card:hover {
 }
 .kpi-icon {
     width: 36px; height: 36px;
-    border-radius: 8px;
+    border-radius: 10px;
     display: flex; align-items: center; justify-content: center;
     font-size: 15px;
     margin-bottom: 8px;
@@ -371,7 +375,7 @@ a.kpi-card:hover {
 .preview-table th { background: #eff6ff; color: #1d4ed8; font-size: 11px; padding: 6px 8px; border: 1px solid #dbeafe; white-space: nowrap; }
 .preview-table td { padding: 4px 6px; border: 1px solid #e5e7eb; vertical-align: middle; }
 .preview-table tr:nth-child(even) td { background: #f9fafb; }
-.preview-table input, .preview-table select { font-size: 12px; padding: 3px 6px; border: 1px solid #d1d5db; border-radius: 4px; width: 100%; box-sizing: border-box; }
+.preview-table input, .preview-table select { font-size: 12px; padding: 3px 6px; border: 1px solid #d1d5db; border-radius: 6px; width: 100%; box-sizing: border-box; }
 .preview-table input:focus, .preview-table select:focus { outline: none; border-color: #2563eb; box-shadow: 0 0 0 2px #dbeafe; }
 .parsed-badge { display: inline-block; background: #d1fae5; color: #065f46; font-size: 11px; padding: 2px 8px; border-radius: 10px; font-weight: 600; }
 .btn-process { font-size: 11px; padding: 2px 8px; }
@@ -441,40 +445,47 @@ a.kpi-card:hover {
 /* ---------- Профиль / Тепловая карта ---------- */
 
 .heatmap-outer {
-    overflow-x: auto;
+    overflow: visible;
+    width: 100%;
 }
 .heatmap-months {
     display: flex;
-    gap: 3px;
+    gap: 2px;
     margin-bottom: 4px;
-    min-width: 640px;
 }
 .heatmap-month-label {
+    flex: 1;
+    min-width: 0;
     font-size: 10px;
     color: var(--tn-text-muted);
     white-space: nowrap;
-    overflow: hidden;
+    overflow: visible;
 }
 .heatmap-grid {
     display: flex;
-    gap: 3px;
-    min-width: 640px;
+    gap: 2px;
 }
 .heatmap-week {
+    flex: 1;
     display: flex;
     flex-direction: column;
-    gap: 3px;
+    gap: 2px;
 }
 .heatmap-cell-wrap {
     position: relative;
-    display: inline-block;
+    display: block;
 }
 .heatmap-cell {
-    width: 13px;
-    height: 13px;
+    width: 11px;
+    height: 11px;
     border-radius: 2px;
     background: #ebedf0;
     display: block;
+}
+.heatmap-cell-grid {
+    width: 100%;
+    height: auto;
+    aspect-ratio: 1;
 }
 .heatmap-cell.lv1 { background: #9be9a8; }
 .heatmap-cell.lv2 { background: #40c463; }
@@ -586,7 +597,7 @@ a.kpi-card:hover {
     text-align: center;
     padding: 16px;
     background: var(--tn-bg);
-    border-radius: 8px;
+    border-radius: 10px;
 }
 .stat-mini-val  { font-size: 22px; font-weight: 700; color: var(--tn-text); }
 .stat-mini-lbl  { font-size: 12px; color: var(--tn-text-muted); margin-top: 2px; }
@@ -603,7 +614,7 @@ a.kpi-card:hover {
 .event-item:last-child { border-bottom: none; }
 .event-icon {
     width: 32px; height: 32px; flex-shrink: 0;
-    border-radius: 8px;
+    border-radius: 10px;
     display: flex; align-items: center; justify-content: center;
     font-size: 13px;
 }
@@ -644,7 +655,7 @@ a.kpi-card:hover {
     padding: 12px 16px;
     background: #eff6ff;
     border: 1px solid #bfdbfe;
-    border-radius: 8px;
+    border-radius: 10px;
     color: #1e40af;
     font-size: 13px;
     margin-bottom: 20px;
@@ -709,7 +720,7 @@ a.kpi-card:hover {
 /* ── Route block ── */
 .mk-route-block {
     background: #fff;
-    border-radius: 10px;
+    border-radius: 12px;
     margin-bottom: 12px;
     border: 1.5px solid var(--tn-border);
     box-shadow: 0 1px 4px rgba(0,0,0,.05);
@@ -723,17 +734,37 @@ a.kpi-card:hover {
 
 .mk-route-header {
     display: flex;
-    align-items: center;
-    gap: 10px;
-    padding: 12px 16px;
+    flex-direction: column;
+    padding: 10px 16px;
     cursor: pointer;
     user-select: none;
-    flex-wrap: wrap;
     background: #fafafa;
     transition: background .12s;
 }
-
 .mk-route-header:hover { background: #f1f5f9; }
+
+.mk-route-row-main {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    flex-wrap: wrap;
+}
+
+.mk-route-row-meta {
+    display: flex;
+    gap: 20px;
+    font-size: 11px;
+    color: var(--tn-text-muted);
+    margin-top: 7px;
+    padding-top: 7px;
+    border-top: 1px solid var(--tn-border);
+    flex-wrap: wrap;
+}
+.mk-route-meta-item {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+}
 
 .mk-route-num {
     font-weight: 700;
@@ -814,7 +845,7 @@ a.kpi-card:hover {
     min-height: 130px;
     background: #fff;
     border: 1.5px solid #e2e8f0;
-    border-radius: 10px;
+    border-radius: 12px;
     padding: 12px;
     cursor: pointer;
     transition: border-color .15s, box-shadow .15s;
@@ -924,5 +955,124 @@ a.kpi-card:hover {
     font-weight: 700;
     color: #2563eb;
     letter-spacing: -1px;
+}
+
+/* ── Product picker ── */
+.product-picker-toggle {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    padding: 5px 12px;
+    border: 1.5px solid var(--tn-border);
+    border-radius: 10px;
+    background: #fff;
+    cursor: pointer;
+    font-size: 13px;
+    font-weight: 500;
+    white-space: nowrap;
+    max-width: 280px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    transition: border-color .15s, box-shadow .15s;
+}
+.product-picker-toggle:hover {
+    border-color: var(--tn-blue);
+    box-shadow: 0 0 0 3px rgba(37,99,235,.08);
+}
+
+.product-picker-menu {
+    position: absolute;
+    top: calc(100% + 6px);
+    left: 0;
+    z-index: 1000;
+    min-width: 300px;
+    max-width: 400px;
+    background: #fff;
+    border: 1.5px solid var(--tn-border);
+    border-radius: 12px;
+    box-shadow: 0 8px 24px rgba(0,0,0,.12);
+    overflow: hidden;
+    max-height: 380px;
+    overflow-y: auto;
+}
+
+.product-picker-item {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 9px 14px;
+    border-bottom: 1px solid #f1f5f9;
+    transition: background .1s;
+}
+.product-picker-item:last-child { border-bottom: none; }
+.product-picker-item:hover { background: #f8fafc; }
+.product-picker-item.selected { background: #eff6ff; }
+
+.product-picker-name {
+    flex: 1;
+    font-size: 13px;
+    font-weight: 500;
+    cursor: pointer;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.product-picker-actions {
+    display: flex;
+    gap: 4px;
+    flex-shrink: 0;
+}
+.product-picker-actions button {
+    border: none;
+    background: none;
+    padding: 3px 6px;
+    border-radius: 8px;
+    color: #94a3b8;
+    cursor: pointer;
+    font-size: 14px;
+    transition: color .12s, background .12s;
+}
+.product-picker-actions button:hover {
+    color: var(--tn-blue);
+    background: #eff6ff;
+}
+
+/* ── Diff step highlight ── */
+.mk-step-card.diff {
+    border-color: #dc2626 !important;
+    background: #fff5f5;
+}
+.mk-step-card.diff .mk-step-num {
+    color: #dc2626;
+}
+
+/* Отличие только в нормах (операция та же) — оранжевый */
+.mk-step-card.norms-diff {
+    border-color: #d97706 !important;
+    background: #fffbeb;
+}
+.mk-step-card.norms-diff .mk-step-num {
+    color: #d97706;
+}
+.mk-step-norms-section {
+    border-radius: 6px;
+    transition: background .1s;
+}
+.mk-step-norms-section.has-diff {
+    background: #fef3c7;
+    padding: 3px 5px;
+    margin: 2px -5px;
+}
+
+.mk-diff-notice {
+    padding: 6px 16px;
+    background: #fef2f2;
+    border-top: 1px solid #fee2e2;
+    font-size: 12px;
+    color: #dc2626;
+    display: flex;
+    align-items: center;
+    gap: 6px;
 }
 

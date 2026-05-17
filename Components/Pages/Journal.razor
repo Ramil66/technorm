@@ -2,6 +2,8 @@
 @attribute [Authorize]
 @rendermode InteractiveServer
 @inject IAuditLogService AuditSvc
+@using System.Text.Json
+@using Microsoft.AspNetCore.Components.Authorization
 
 <PageTitle>История — ТехНорм</PageTitle>
 
@@ -18,14 +20,31 @@
                 <input class="form-control form-control-sm" placeholder="Поиск по действию..."
                        @bind="filterSearch" @bind:after="ApplyFilter" />
             </div>
-            <div class="col-md-4">
-                <select class="form-select form-select-sm" @bind="filterEntity" @bind:after="ApplyFilter">
-                    <option value="">Все объекты</option>
-                    @foreach (var entity in entityTypes)
-                    {
-                        <option value="@entity">@entity</option>
-                    }
-                </select>
+            @if (isAdmin)
+            {
+                <div class="col-md-3">
+                    <select class="form-select form-select-sm" @bind="filterUserId" @bind:after="ApplyFilter">
+                        <option value="0">Все пользователи</option>
+                        @foreach (var u in filterUsers)
+                        {
+                            <option value="@u.Id">@u.Name</option>
+                        }
+                    </select>
+                </div>
+            }
+            <div class="col-md-2">
+                <input type="date" class="form-control form-control-sm" title="С даты"
+                       @bind="filterDateFrom" @bind:after="ApplyFilter" />
+            </div>
+            <div class="col-md-2">
+                <input type="date" class="form-control form-control-sm" title="По дату"
+                       @bind="filterDateTo" @bind:after="ApplyFilter" />
+            </div>
+            <div class="col-auto">
+                <button class="btn btn-sm btn-outline-secondary" title="Сбросить фильтры"
+                        @onclick="ClearFilters">
+                    <i class="fa-solid fa-xmark"></i>
+                </button>
             </div>
         </div>
     </div>
@@ -50,7 +69,6 @@
                             <th style="width:36px;"></th>
                             <th>Пользователь</th>
                             <th>Действие</th>
-                            <th>Объект</th>
                             <th style="white-space:nowrap;">Дата и время</th>
                         </tr>
                     </thead>
@@ -64,19 +82,12 @@
                                     </div>
                                 </td>
                                 <td style="font-weight:500;">@(log.User?.FullName ?? "—")</td>
-                                <td>@log.Action</td>
                                 <td>
-                                    @if (log.EntityType is not null)
+                                    <div>@log.Action</div>
+                                    @{ var detail = GetLogDetail(log); }
+                                    @if (detail is not null)
                                     {
-                                        <span class="badge-status badge-new" style="font-size:11px;">@log.EntityType</span>
-                                        @if (log.EntityId.HasValue)
-                                        {
-                                            <span class="ms-1 text-muted" style="font-size:12px;">#@log.EntityId</span>
-                                        }
-                                    }
-                                    else
-                                    {
-                                        <span class="text-muted">—</span>
+                                        <div style="font-size:11px;color:var(--tn-text-muted);margin-top:2px;">@detail</div>
                                     }
                                 </td>
                                 <td style="white-space:nowrap;color:var(--tn-text-muted);font-size:13px;">
@@ -92,21 +103,36 @@
 </div>
 
 @code {
-    private List<AuditLog> allLogs      = [];
-    private List<AuditLog> filteredLogs = [];
-    private List<string>   entityTypes  = [];
-    private string filterSearch = "";
-    private string filterEntity = "";
+    [CascadingParameter] private Task<AuthenticationState> AuthStateTask { get; set; } = default!;
+
+    private bool                        isAdmin      = false;
+    private int                         currentUserId;
+    private List<AuditLog>              allLogs      = [];
+    private List<AuditLog>              filteredLogs = [];
+    private string                      filterSearch   = "";
+    private int                         filterUserId   = 0;
+    private DateTime?                   filterDateFrom;
+    private DateTime?                   filterDateTo;
+    private List<(int Id, string Name)> filterUsers  = [];
 
     protected override async Task OnInitializedAsync()
     {
-        allLogs     = await AuditSvc.GetRecentAsync(500);
-        entityTypes = allLogs
-            .Where(l => l.EntityType is not null)
-            .Select(l => l.EntityType!)
-            .Distinct()
-            .OrderBy(e => e)
-            .ToList();
+        var state = await AuthStateTask;
+        isAdmin       = state.User.IsInRole("admin");
+        currentUserId = int.Parse(state.User.FindFirst("UserId")?.Value ?? "0");
+
+        var raw = await AuditSvc.GetRecentAsync(500);
+        allLogs = isAdmin ? raw : raw.Where(l => l.UserId == currentUserId).ToList();
+
+        if (isAdmin)
+        {
+            filterUsers = allLogs
+                .Where(l => l.User is not null && l.UserId.HasValue)
+                .Select(l => (l.UserId!.Value, l.User!.FullName))
+                .DistinctBy(u => u.Item1)
+                .OrderBy(u => u.Item2)
+                .ToList();
+        }
         ApplyFilter();
     }
 
@@ -115,8 +141,65 @@
         filteredLogs = allLogs
             .Where(l => string.IsNullOrEmpty(filterSearch) ||
                         l.Action.Contains(filterSearch, StringComparison.OrdinalIgnoreCase))
-            .Where(l => string.IsNullOrEmpty(filterEntity) || l.EntityType == filterEntity)
+            .Where(l => filterUserId == 0 || l.UserId == filterUserId)
+            .Where(l => filterDateFrom is null ||
+                        l.CreatedAt.ToLocalTime().Date >= filterDateFrom.Value.Date)
+            .Where(l => filterDateTo is null ||
+                        l.CreatedAt.ToLocalTime().Date <= filterDateTo.Value.Date)
             .ToList();
+    }
+
+    private void ClearFilters()
+    {
+        filterSearch   = "";
+        filterUserId   = 0;
+        filterDateFrom = null;
+        filterDateTo   = null;
+        ApplyFilter();
+    }
+
+    private static string? GetLogDetail(AuditLog log)
+    {
+        if (log.OldValue is not null && log.NewValue is not null)
+        {
+            var oldR = log.OldValue.RootElement;
+            var newR = log.NewValue.RootElement;
+            if (oldR.TryGetProperty("oldName", out var oldN) && newR.TryGetProperty("newName", out var newN))
+                return $"«{oldN.GetString()}» → «{newN.GetString()}»";
+        }
+
+        var doc = log.NewValue ?? log.OldValue;
+        if (doc is null) return null;
+        var root = doc.RootElement;
+        var parts = new List<string>();
+
+        if (root.TryGetProperty("Activity", out var act) && act.ValueKind == JsonValueKind.String && !string.IsNullOrEmpty(act.GetString()))
+        {
+            parts.Add($"«{act.GetString()}»");
+            if (root.TryGetProperty("CaseId", out var caseId) && caseId.ValueKind == JsonValueKind.String)
+                parts.Add($"дело: {caseId.GetString()}");
+            return string.Join(", ", parts);
+        }
+
+        foreach (var field in new[] { "Name", "FileName", "OriginalName", "newName" })
+        {
+            if (root.TryGetProperty(field, out var v) && v.ValueKind == JsonValueKind.String && !string.IsNullOrEmpty(v.GetString()))
+            {
+                parts.Add($"«{v.GetString()}»");
+                break;
+            }
+        }
+
+        if (root.TryGetProperty("SequenceNum", out var seq) && seq.ValueKind == JsonValueKind.Number)
+            parts.Add($"шаг #{seq.GetInt32()}");
+
+        if (root.TryGetProperty("Version", out var ver) && ver.ValueKind == JsonValueKind.Number)
+            parts.Add($"v{ver.GetInt32()}");
+
+        if (root.TryGetProperty("EventCount", out var ec) && ec.ValueKind == JsonValueKind.Number)
+            parts.Add($"{ec.GetInt32()} событий");
+
+        return parts.Count > 0 ? string.Join(" ", parts) : null;
     }
 
     private static string ActionIcon(string action) => action.ToLower() switch

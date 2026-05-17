@@ -63,7 +63,6 @@ public class ResourceService(IDbContextFactory<TechNormDbContext> factory) : IRe
     public async Task DeleteAsync(int id)
     {
         using var db = await factory.CreateDbContextAsync();
-        // Nullify FK references (resource_id is nullable in both tables)
         await db.TimeNorms.Where(t => t.ResourceId == id)
             .ExecuteUpdateAsync(s => s.SetProperty(t => t.ResourceId, (int?)null));
         await db.EventLogs.Where(e => e.ResourceId == id)

@@ -5,6 +5,8 @@
 @inject IProductService ProductSvc
 @inject IOperationService OperationSvc
 @inject IResourceService ResourceSvc
+@inject IAuditLogService AuditSvc
+@inject IRouteBuilderService RouteBuildSvc
 
 <PageTitle>Журнал событий — ТехНорм</PageTitle>
 
@@ -220,7 +222,6 @@
         <div class="tn-modal" @onclick:stopPropagation style="max-width:680px;">
             <div class="tn-modal-header">
                 <h5><i class="fa-solid fa-pen" style="color:var(--tn-blue);margin-right:8px;"></i>Редактировать событие</h5>
-                <button class="btn-close" @onclick="CloseEditModal"></button>
             </div>
             <div class="row g-3 mt-1">
                 <div class="col-md-4">
@@ -338,7 +339,6 @@
     private EventForm form = new();
     private int currentUserId;
 
-    // Edit modal
     private bool      showEditModal = false;
     private EventLog? editingEvent;
     private string?   editError;
@@ -346,7 +346,6 @@
     private int       editShift = 1;
     private int       editQty   = 1;
 
-    // Delete confirm modal
     private bool showDeleteConfirm = false;
     private long pendingDeleteId   = 0;
 
@@ -425,6 +424,10 @@
         };
 
         var created = await EventSvc.CreateAsync(ev);
+        await AuditSvc.LogAsync(currentUserId, "Событие добавлено вручную", "EventLog", (int?)created.Id,
+            null, new { created.CaseId, created.Activity, ProductId = created.ProductId });
+        if (created.ProductId.HasValue)
+            await RouteBuildSvc.AutoUpdateIfEnabledAsync(created.ProductId.Value, currentUserId);
         EnrichLocal(created);
         allEvents.Insert(0, created);
         ApplyFilter();
@@ -432,7 +435,6 @@
         showForm = false;
     }
 
-    // ── Edit ─────────────────────────────────────────────────────────────────
     private void OpenEditModal(EventLog e)
     {
         editingEvent = new EventLog
@@ -471,6 +473,8 @@
             var meta = new { Shift = editShift, Quantity = editQty, OperationId = (int?)null };
             editingEvent.Metadata = JsonDocument.Parse(JsonSerializer.Serialize(meta));
             await EventSvc.UpdateAsync(editingEvent);
+            await AuditSvc.LogAsync(currentUserId, "Событие изменено", "EventLog", (int?)editingEvent.Id,
+                null, new { editingEvent.CaseId, editingEvent.Activity, ProductId = editingEvent.ProductId });
 
             var local = allEvents.FirstOrDefault(e => e.Id == editingEvent.Id);
             if (local is not null)
@@ -491,7 +495,6 @@
         finally { isSavingEdit = false; }
     }
 
-    // ── Delete ────────────────────────────────────────────────────────────────
     private void AskDeleteEvent(long id)
     {
         pendingDeleteId  = id;
@@ -507,13 +510,15 @@
     private async Task ConfirmDelete()
     {
         showDeleteConfirm = false;
+        var deleted = allEvents.FirstOrDefault(e => e.Id == pendingDeleteId);
         await EventSvc.DeleteAsync(pendingDeleteId);
+        await AuditSvc.LogAsync(currentUserId, "Событие удалено", "EventLog", (int?)pendingDeleteId,
+            new { CaseId = deleted?.CaseId, Activity = deleted?.Activity }, null);
         allEvents.RemoveAll(e => e.Id == pendingDeleteId);
         pendingDeleteId = 0;
         ApplyFilter();
     }
 
-    // ── Helpers ───────────────────────────────────────────────────────────────
     private void EnrichLocal(EventLog e)
     {
         if (e.ProductId.HasValue)  e.Product  = products.FirstOrDefault(p => p.Id == e.ProductId.Value);

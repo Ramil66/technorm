@@ -6,6 +6,8 @@
 @inject IEventLogService      EventSvc
 @inject IResourceService      ResSvc
 @inject IProductService       ProdSvc
+@inject IAuditLogService      AuditSvc
+@inject IRouteBuilderService  RouteBuildSvc
 @using System.Text.Json
 
 <PageTitle>Загрузка файлов — ТехНорм</PageTitle>
@@ -400,11 +402,9 @@
     private string? uploadingName;
     private int     currentUserId;
 
-    // ── File viewer state ─────────────────────────────────────────────────────
     private Document?     viewerDoc         = null;
     private int           deleteConfirmDocId = 0;
 
-    // ── Preview state ─────────────────────────────────────────────────────────
     private bool          showPreview  = false;
     private bool          isParsing    = false;
     private bool          isSaving     = false;
@@ -429,7 +429,6 @@
         ApplyFilter();
     }
 
-    // ── Upload ────────────────────────────────────────────────────────────────
     private async Task HandleFiles(InputFileChangeEventArgs e)
     {
         isDragging   = false;
@@ -463,6 +462,8 @@
 
                 await using var stream = file.OpenReadStream(50 * 1024 * 1024);
                 var doc = await DocSvc.SaveAsync(stream, file.Name, fileType, currentUserId);
+                await AuditSvc.LogAsync(currentUserId, "Файл загружен", "Document", doc.Id,
+                    null, new { FileName = doc.OriginalName, doc.FileType });
                 documents.Insert(0, doc);
                 successCount++;
                 lastUploaded = doc;
@@ -486,7 +487,6 @@
 
         ApplyFilter();
 
-        // Automatically open preview for the last uploaded parseable file
         if (lastUploaded is not null &&
             (lastUploaded.FileType == "pdf" || lastUploaded.FileType == "excel"))
         {
@@ -494,7 +494,6 @@
         }
     }
 
-    // ── Preview modal ─────────────────────────────────────────────────────────
     private async Task OpenPreviewForDoc(Document doc)
     {
         previewDocId   = doc.Id;
@@ -529,7 +528,6 @@
     {
         saveError = null;
 
-        // Validate
         var invalid = previewRows.Where(r => string.IsNullOrWhiteSpace(r.CaseId) ||
                                              string.IsNullOrWhiteSpace(r.Activity)).ToList();
         if (invalid.Any())
@@ -568,9 +566,18 @@
             }).ToList();
 
             await EventSvc.CreateBatchAsync(eventLogs);
+            await AuditSvc.LogAsync(currentUserId, "Данные документа импортированы", "Document", previewDocId,
+                null, new { FileName = previewDocName, EventCount = eventLogs.Count });
+
+            var affectedProducts = eventLogs
+                .Where(e => e.ProductId.HasValue)
+                .Select(e => e.ProductId!.Value)
+                .Distinct();
+            foreach (var pid in affectedProducts)
+                await RouteBuildSvc.AutoUpdateIfEnabledAsync(pid, currentUserId);
+
             await DocSvc.UpdateStatusAsync(previewDocId, "processed");
 
-            // Refresh document in local list
             var updated = documents.FirstOrDefault(d => d.Id == previewDocId);
             if (updated is not null) updated.Status = "processed";
 
@@ -589,11 +596,9 @@
         }
     }
 
-    // ── File viewer ───────────────────────────────────────────────────────────
     private void OpenFileViewer(Document doc) => viewerDoc = doc;
     private void CloseFileViewer()            => viewerDoc = null;
 
-    // ── Delete ────────────────────────────────────────────────────────────────
     private void AskDeleteDoc(int id)
     {
         deleteConfirmDocId = id;
@@ -610,13 +615,15 @@
     {
         var id = deleteConfirmDocId;
         deleteConfirmDocId = 0;
+        var docName = documents.FirstOrDefault(d => d.Id == id)?.OriginalName;
         if (viewerDoc?.Id == id) viewerDoc = null;
         await DocSvc.DeleteAsync(id);
+        await AuditSvc.LogAsync(currentUserId, "Файл удалён", "Document", id,
+            new { FileName = docName }, null);
         documents.RemoveAll(d => d.Id == id);
         ApplyFilter();
     }
 
-    // ── Helpers ───────────────────────────────────────────────────────────────
     private void ApplyFilter()
     {
         filteredDocs = string.IsNullOrEmpty(filterStatus)

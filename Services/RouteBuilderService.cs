@@ -39,9 +39,11 @@ public class MinerResult
 
 public interface IRouteBuilderService
 {
-    Task<MinerResult> MineFromEventsAsync(int productId);
-    Task<TechRoute>   BuildRouteFromMinerAsync(
+    Task<MinerResult>       MineFromEventsAsync(int productId);
+    Task<List<TechRoute>>   BuildRouteFromMinerAsync(
         MinerResult result, int productId, string routeName, int userId);
+    Task AutoUpdateIfEnabledAsync(int productId, int userId);
+    Task ManualRebuildAsync(int routeId, int userId);
 }
 
 
@@ -78,7 +80,6 @@ public class RouteBuilderService(
         var actCases       = new Dictionary<string, HashSet<string>>();
         var actDurations   = new Dictionary<string, List<decimal>>();
         var actResources   = new Dictionary<string, HashSet<string>>();
-        // per-activity per-resource durations for norm calculation
         var actResDurs     = new Dictionary<(string Act, string Res), List<decimal>>();
 
         foreach (var trace in traces)
@@ -100,14 +101,12 @@ public class RouteBuilderService(
                 {
                     var mins = (decimal)evt.Duration.Value.TotalMinutes;
 
-                    // Overall per-activity (first occurrence in trace)
                     if (seenDuration.Add(act))
                     {
                         if (!actDurations.ContainsKey(act)) actDurations[act] = [];
                         actDurations[act].Add(mins);
                     }
 
-                    // Per-resource breakdown
                     if (evt.Resource is not null)
                     {
                         var key = (act, evt.Resource.Name);
@@ -192,84 +191,236 @@ public class RouteBuilderService(
         };
     }
 
-    public async Task<TechRoute> BuildRouteFromMinerAsync(
+    public async Task<List<TechRoute>> BuildRouteFromMinerAsync(
         MinerResult result, int productId, string routeName, int userId)
     {
         await using var db = await factory.CreateDbContextAsync();
         var operations = await db.Operations.ToListAsync();
         var resources  = await db.Resources.ToListAsync();
+        var actLookup  = result.Activities.ToDictionary(a => a.Name);
 
-        var route = new TechRoute
+        var paths = CartesianPaths(result.Stages).ToList();
+
+        var createdRoutes = new List<TechRoute>();
+        for (int pi = 0; pi < paths.Count; pi++)
         {
-            ProductId = productId,
-            Name      = routeName,
-            Status    = "draft",
-            Version   = 1,
-            CreatedBy = userId,
-        };
-        route = await routeSvc.CreateAsync(route);
+            var path = paths[pi];
+            var name = pi == 0 ? routeName : $"{routeName} (вариант {pi + 1})";
 
-        var actLookup = result.Activities.ToDictionary(a => a.Name);
-
-        int seqNum = 0;
-        foreach (var stage in result.Stages)
-        {
-            seqNum++;
-            foreach (var actName in stage)
+            var route = new TechRoute
             {
+                ProductId        = productId,
+                Name             = name,
+                Status           = "draft",
+                Version          = 1,
+                CreatedBy        = userId,
+                SourceEventCount = result.TotalEvents,
+            };
+            route = await routeSvc.CreateAsync(route);
+
+            int seqNum = 0;
+            foreach (var actName in path)
+            {
+                seqNum++;
                 var act = actLookup.GetValueOrDefault(actName);
                 var op  = operations.FirstOrDefault(o =>
                     string.Equals(o.Name, actName, StringComparison.OrdinalIgnoreCase));
 
-                var step = new RouteStep
+                var step = await stepSvc.CreateAsync(new RouteStep
                 {
                     RouteId     = route.Id,
-                    SequenceNum = seqNum,          // parallel activities share same number
+                    SequenceNum = seqNum,
                     OperationId = op?.Id,
                     Description = op is null ? actName : null,
-                };
-                step = await stepSvc.CreateAsync(step);
+                });
 
                 if (act is not null)
                 {
                     if (act.ResourceStats.Any())
                     {
-                        // Create one norm per resource that has duration data
                         foreach (var rs in act.ResourceStats)
                         {
                             var resource = resources.FirstOrDefault(r =>
                                 string.Equals(r.Name, rs.ResourceName,
                                               StringComparison.OrdinalIgnoreCase));
                             if (resource is not null && rs.AvgDurationMin > 0)
-                            {
                                 await timeNormSvc.UpsertAsync(new TimeNorm
                                 {
-                                    RouteStepId = step.Id,
-                                    ResourceId  = resource.Id,
-                                    NormValue   = rs.AvgDurationMin,
-                                    IsManual    = false,
-                                    UpdatedAt   = DateTime.UtcNow,
+                                    RouteStepId = step.Id, ResourceId = resource.Id,
+                                    NormValue = rs.AvgDurationMin, IsManual = false, UpdatedAt = DateTime.UtcNow,
                                 });
-                            }
                         }
                     }
                     else if (act.AvgDurationMin > 0)
                     {
-                        // No resource breakdown — create a general norm (ResourceId = null)
                         await timeNormSvc.UpsertAsync(new TimeNorm
                         {
-                            RouteStepId = step.Id,
-                            ResourceId  = null,
-                            NormValue   = act.AvgDurationMin,
-                            IsManual    = false,
-                            UpdatedAt   = DateTime.UtcNow,
+                            RouteStepId = step.Id, ResourceId = null,
+                            NormValue = act.AvgDurationMin, IsManual = false, UpdatedAt = DateTime.UtcNow,
                         });
                     }
                 }
             }
+            createdRoutes.Add(route);
+        }
+        return createdRoutes;
+    }
+
+    public async Task AutoUpdateIfEnabledAsync(int productId, int userId)
+    {
+        await using var db = await factory.CreateDbContextAsync();
+
+        var route = await db.TechRoutes.FirstOrDefaultAsync(r =>
+            r.ProductId == productId &&
+            r.Status == "published" &&
+            r.IsAutoUpdate &&
+            r.SourceEventCount != null);
+        if (route is null) return;
+
+        var result = await MineFromEventsAsync(productId);
+        if (!result.Success) return;
+
+        var stepIds = await db.RouteSteps
+            .Where(s => s.RouteId == route.Id)
+            .Select(s => s.Id)
+            .ToListAsync();
+
+        await db.TimeNorms.Where(t => stepIds.Contains(t.RouteStepId)).ExecuteDeleteAsync();
+        await db.MaterialNorms.Where(m => stepIds.Contains(m.RouteStepId)).ExecuteDeleteAsync();
+        await db.RouteSteps.Where(s => s.RouteId == route.Id).ExecuteDeleteAsync();
+
+        var operations = await db.Operations.ToListAsync();
+        var resources  = await db.Resources.ToListAsync();
+        var actLookup  = result.Activities.ToDictionary(a => a.Name);
+
+        int seqNum = 0;
+        foreach (var stage in result.Stages)
+        {
+            seqNum++;
+            var actName = stage[0]; // flatten parallel — take first activity per stage
+            var act     = actLookup.GetValueOrDefault(actName);
+            var op      = operations.FirstOrDefault(o =>
+                string.Equals(o.Name, actName, StringComparison.OrdinalIgnoreCase));
+
+            var step = await stepSvc.CreateAsync(new RouteStep
+            {
+                RouteId     = route.Id,
+                SequenceNum = seqNum,
+                OperationId = op?.Id,
+                Description = op is null ? actName : null,
+            });
+
+            if (act is not null)
+            {
+                if (act.ResourceStats.Any())
+                {
+                    foreach (var rs in act.ResourceStats)
+                    {
+                        var resource = resources.FirstOrDefault(r =>
+                            string.Equals(r.Name, rs.ResourceName, StringComparison.OrdinalIgnoreCase));
+                        if (resource is not null && rs.AvgDurationMin > 0)
+                            await timeNormSvc.UpsertAsync(new TimeNorm
+                            {
+                                RouteStepId = step.Id, ResourceId = resource.Id,
+                                NormValue = rs.AvgDurationMin, IsManual = false, UpdatedAt = DateTime.UtcNow,
+                            });
+                    }
+                }
+                else if (act.AvgDurationMin > 0)
+                {
+                    await timeNormSvc.UpsertAsync(new TimeNorm
+                    {
+                        RouteStepId = step.Id, ResourceId = null,
+                        NormValue = act.AvgDurationMin, IsManual = false, UpdatedAt = DateTime.UtcNow,
+                    });
+                }
+            }
         }
 
-        return route;
+        await db.TechRoutes.Where(r => r.Id == route.Id)
+            .ExecuteUpdateAsync(s => s
+                .SetProperty(r => r.SourceEventCount, result.TotalEvents)
+                .SetProperty(r => r.UpdatedAt, DateTime.UtcNow));
+    }
+
+    public async Task ManualRebuildAsync(int routeId, int userId)
+    {
+        await using var db = await factory.CreateDbContextAsync();
+        var route = await db.TechRoutes.FindAsync(routeId);
+        if (route is null || !route.SourceEventCount.HasValue) return;
+
+        var result = await MineFromEventsAsync(route.ProductId);
+        if (!result.Success) return;
+
+        var stepIds = await db.RouteSteps
+            .Where(s => s.RouteId == routeId)
+            .Select(s => s.Id)
+            .ToListAsync();
+
+        await db.TimeNorms.Where(t => stepIds.Contains(t.RouteStepId)).ExecuteDeleteAsync();
+        await db.MaterialNorms.Where(m => stepIds.Contains(m.RouteStepId)).ExecuteDeleteAsync();
+        await db.RouteSteps.Where(s => s.RouteId == routeId).ExecuteDeleteAsync();
+
+        var operations = await db.Operations.ToListAsync();
+        var resources  = await db.Resources.ToListAsync();
+        var actLookup  = result.Activities.ToDictionary(a => a.Name);
+
+        int seqNum = 0;
+        foreach (var stage in result.Stages)
+        {
+            seqNum++;
+            var actName = stage[0];
+            var act     = actLookup.GetValueOrDefault(actName);
+            var op      = operations.FirstOrDefault(o =>
+                string.Equals(o.Name, actName, StringComparison.OrdinalIgnoreCase));
+
+            var step = await stepSvc.CreateAsync(new RouteStep
+            {
+                RouteId     = routeId,
+                SequenceNum = seqNum,
+                OperationId = op?.Id,
+                Description = op is null ? actName : null,
+            });
+
+            if (act is not null)
+            {
+                if (act.ResourceStats.Any())
+                {
+                    foreach (var rs in act.ResourceStats)
+                    {
+                        var resource = resources.FirstOrDefault(r =>
+                            string.Equals(r.Name, rs.ResourceName, StringComparison.OrdinalIgnoreCase));
+                        if (resource is not null && rs.AvgDurationMin > 0)
+                            await timeNormSvc.UpsertAsync(new TimeNorm
+                            {
+                                RouteStepId = step.Id, ResourceId = resource.Id,
+                                NormValue = rs.AvgDurationMin, IsManual = false, UpdatedAt = DateTime.UtcNow,
+                            });
+                    }
+                }
+                else if (act.AvgDurationMin > 0)
+                {
+                    await timeNormSvc.UpsertAsync(new TimeNorm
+                    {
+                        RouteStepId = step.Id, ResourceId = null,
+                        NormValue = act.AvgDurationMin, IsManual = false, UpdatedAt = DateTime.UtcNow,
+                    });
+                }
+            }
+        }
+
+        await db.TechRoutes.Where(r => r.Id == routeId)
+            .ExecuteUpdateAsync(s => s
+                .SetProperty(r => r.SourceEventCount, result.TotalEvents)
+                .SetProperty(r => r.UpdatedAt, DateTime.UtcNow));
+    }
+
+    private static IEnumerable<List<string>> CartesianPaths(List<List<string>> stages)
+    {
+        IEnumerable<List<string>> current = [[]];
+        foreach (var stage in stages)
+            current = current.SelectMany(p => stage.Select(a => p.Append(a).ToList()));
+        return current;
     }
 
     private static List<string> InductiveMinerOrder(
@@ -319,7 +470,6 @@ public class RouteBuilderService(
             }
         }
 
-        // Back-edge activities (loop bodies)
         foreach (var act in acts.Except(visited)
                             .OrderByDescending(a => startCnt.GetValueOrDefault(a)))
             sorted.Add(act);
@@ -340,7 +490,6 @@ public class RouteBuilderService(
         {
             var curr = ordered[i];
 
-            // curr is parallel if it mutually follows every activity in currentStage
             bool isParallel = currentStage.Count > 0 && currentStage.All(prev =>
                 dfg.ContainsKey((prev, curr)) && dfg.ContainsKey((curr, prev)));
 

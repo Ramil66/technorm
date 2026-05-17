@@ -5,6 +5,8 @@
 @inject IResourceService ResSvc
 @inject IMaterialService MatSvc
 @inject IJSRuntime JS
+@inject IAuditLogService AuditSvc
+@using Microsoft.AspNetCore.Components.Authorization
 
 <PageTitle>Справочники — ТехНорм</PageTitle>
 
@@ -182,7 +184,6 @@
         <div class="tn-modal" @onclick:stopPropagation>
             <div class="tn-modal-header">
                 <h5>@ModalTitle</h5>
-                <button class="btn-close" @onclick="CloseModal"></button>
             </div>
 
             @if (activeTab == 0)
@@ -260,6 +261,9 @@
 }
 
 @code {
+    [CascadingParameter] private Task<AuthenticationState> AuthStateTask { get; set; } = default!;
+
+    private int currentUserId;
     private int activeTab;
     private bool   showModal  = false;
     private bool   isEditing  = false;
@@ -305,6 +309,8 @@
 
     protected override async Task OnInitializedAsync()
     {
+        var auth = await AuthStateTask;
+        currentUserId = int.Parse(auth.User.FindFirst("UserId")?.Value ?? "0");
         operations = await OpSvc.GetAllAsync();
     }
 
@@ -363,12 +369,16 @@
             var op = operations.First(o => o.Id == editId);
             op.Code = opForm.Code; op.Name = opForm.Name; op.Description = opForm.Description;
             await OpSvc.UpdateAsync(op);
+            await AuditSvc.LogAsync(currentUserId, "Операция отредактирована",
+                "Operation", op.Id, newValue: new { op.Code, op.Name });
         }
         else
         {
             var op = new Operation { Code = opForm.Code, Name = opForm.Name, Description = opForm.Description };
             op = await OpSvc.CreateAsync(op);
             operations.Add(op);
+            await AuditSvc.LogAsync(currentUserId, "Операция добавлена",
+                "Operation", op.Id, newValue: new { op.Code, op.Name });
         }
         CloseModal();
     }
@@ -381,12 +391,16 @@
             var r = resources.First(r => r.Id == editId);
             r.Code = resForm.Code; r.Name = resForm.Name; r.Type = resForm.Type; r.IsActive = resForm.IsActive;
             await ResSvc.UpdateAsync(r);
+            await AuditSvc.LogAsync(currentUserId, "Ресурс отредактирован",
+                "Resource", r.Id, newValue: new { r.Code, r.Name, r.Type });
         }
         else
         {
             var r = new Resource { Code = resForm.Code, Name = resForm.Name, Type = resForm.Type, IsActive = resForm.IsActive };
             r = await ResSvc.CreateAsync(r);
             resources.Add(r);
+            await AuditSvc.LogAsync(currentUserId, "Ресурс добавлен",
+                "Resource", r.Id, newValue: new { r.Code, r.Name, r.Type });
         }
         CloseModal();
     }
@@ -399,12 +413,16 @@
             var m = materials.First(m => m.Id == editId);
             m.Code = matForm.Code; m.Name = matForm.Name; m.Unit = matForm.Unit; m.Description = matForm.Description;
             await MatSvc.UpdateAsync(m);
+            await AuditSvc.LogAsync(currentUserId, "Материал отредактирован",
+                "Material", m.Id, newValue: new { m.Code, m.Name, m.Unit });
         }
         else
         {
             var m = new Material { Code = matForm.Code, Name = matForm.Name, Unit = matForm.Unit, Description = matForm.Description };
             m = await MatSvc.CreateAsync(m);
             materials.Add(m);
+            await AuditSvc.LogAsync(currentUserId, "Материал добавлен",
+                "Material", m.Id, newValue: new { m.Code, m.Name, m.Unit });
         }
         CloseModal();
     }
@@ -412,6 +430,9 @@
     private async Task DeleteOp(int id)
     {
         if (!await JS.InvokeAsync<bool>("tnInterop.confirmDelete", "Удалить операцию?")) return;
+        var op = operations.First(o => o.Id == id);
+        await AuditSvc.LogAsync(currentUserId, "Операция удалена",
+            "Operation", id, oldValue: new { op.Code, op.Name });
         await OpSvc.DeleteAsync(id);
         operations.RemoveAll(o => o.Id == id);
     }
@@ -419,6 +440,9 @@
     private async Task DeleteRes(int id)
     {
         if (!await JS.InvokeAsync<bool>("tnInterop.confirmDelete", "Удалить ресурс?")) return;
+        var r = resources.First(r => r.Id == id);
+        await AuditSvc.LogAsync(currentUserId, "Ресурс удалён",
+            "Resource", id, oldValue: new { r.Code, r.Name });
         await ResSvc.DeleteAsync(id);
         resources.RemoveAll(r => r.Id == id);
     }
@@ -426,6 +450,9 @@
     private async Task DeleteMat(int id)
     {
         if (!await JS.InvokeAsync<bool>("tnInterop.confirmDelete", "Удалить материал?")) return;
+        var m = materials.First(m => m.Id == id);
+        await AuditSvc.LogAsync(currentUserId, "Материал удалён",
+            "Material", id, oldValue: new { m.Code, m.Name });
         await MatSvc.DeleteAsync(id);
         materials.RemoveAll(m => m.Id == id);
     }

@@ -210,7 +210,6 @@ public class DocumentParserService(ILogger<DocumentParserService> logger) : IDoc
             if (caseCol > 0) break;
         }
 
-        // Fallback: positional (1=№, 2=CaseId, 3=Op, 4=Date, 5=Shift, 6=Resource, 7=Dur, 8=Qty)
         if (caseCol == 0) { caseCol=2; actCol=3; dateCol=4; shiftCol=5; resCol=6; durCol=7; qtyCol=8; }
 
         for (int r = headerRow + 1; r <= lastRow; r++)

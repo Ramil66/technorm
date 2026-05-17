@@ -45,7 +45,6 @@ public class OperationService(IDbContextFactory<TechNormDbContext> factory) : IO
     public async Task DeleteAsync(int id)
     {
         using var db = await factory.CreateDbContextAsync();
-        // Nullify FK in route_steps (operation_id is nullable)
         await db.RouteSteps.Where(s => s.OperationId == id)
             .ExecuteUpdateAsync(s => s.SetProperty(r => r.OperationId, (int?)null));
         await db.Operations.Where(o => o.Id == id).ExecuteDeleteAsync();

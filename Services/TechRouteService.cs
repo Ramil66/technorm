@@ -17,6 +17,7 @@ public interface ITechRouteService
     Task ArchiveAsync(int id);
     Task<TechRoute> CreateNewVersionAsync(int sourceId, int userId);
     Task DeleteAsync(int id);
+    Task<TechRoute> DuplicateAsync(int sourceId, string newName, int userId);
 }
 
 public class TechRouteService(IDbContextFactory<TechNormDbContext> factory) : ITechRouteService
@@ -96,7 +97,6 @@ public class TechRouteService(IDbContextFactory<TechNormDbContext> factory) : IT
         var route = await db.TechRoutes.FindAsync(id)
             ?? throw new InvalidOperationException($"TechRoute {id} не найден.");
 
-        // Архивируем текущую опубликованную версию
         await db.TechRoutes
             .Where(r => r.ProductId == route.ProductId && r.Status == "published")
             .ExecuteUpdateAsync(s => s.SetProperty(r => r.Status, "archived"));
@@ -185,5 +185,67 @@ public class TechRouteService(IDbContextFactory<TechNormDbContext> factory) : IT
             .Where(c => c.RouteId == id)
             .ExecuteUpdateAsync(s => s.SetProperty(c => c.RouteId, (int?)null));
         await db.TechRoutes.Where(r => r.Id == id).ExecuteDeleteAsync();
+    }
+
+    public async Task<TechRoute> DuplicateAsync(int sourceId, string newName, int userId)
+    {
+        using var db = await factory.CreateDbContextAsync();
+        var source = await db.TechRoutes
+            .Include(r => r.Steps)
+                .ThenInclude(s => s.TimeNorms)
+            .Include(r => r.Steps)
+                .ThenInclude(s => s.MaterialNorms)
+            .FirstOrDefaultAsync(r => r.Id == sourceId)
+            ?? throw new InvalidOperationException($"TechRoute {sourceId} не найден.");
+
+        var newRoute = new TechRoute
+        {
+            ProductId        = source.ProductId,
+            Version          = source.Version,
+            Status           = "draft",
+            Name             = newName,
+            ProcessTree      = source.ProcessTree,
+            CreatedBy        = userId,
+            SourceEventCount = source.SourceEventCount,
+            CreatedAt        = DateTime.UtcNow,
+            UpdatedAt        = DateTime.UtcNow,
+        };
+        db.TechRoutes.Add(newRoute);
+        await db.SaveChangesAsync();
+
+        foreach (var step in source.Steps.OrderBy(s => s.SequenceNum))
+        {
+            var newStep = new RouteStep
+            {
+                RouteId     = newRoute.Id,
+                SequenceNum = step.SequenceNum,
+                OperationId = step.OperationId,
+                Description = step.Description,
+                Parameters  = step.Parameters,
+            };
+            db.RouteSteps.Add(newStep);
+            await db.SaveChangesAsync();
+
+            foreach (var tn in step.TimeNorms)
+                db.TimeNorms.Add(new TimeNorm
+                {
+                    RouteStepId = newStep.Id,
+                    ResourceId  = tn.ResourceId,
+                    NormValue   = tn.NormValue,
+                    IsManual    = tn.IsManual,
+                    UpdatedAt   = DateTime.UtcNow,
+                });
+
+            foreach (var mn in step.MaterialNorms)
+                db.MaterialNorms.Add(new MaterialNorm
+                {
+                    RouteStepId     = newStep.Id,
+                    MaterialId      = mn.MaterialId,
+                    ConsumptionRate = mn.ConsumptionRate,
+                    UpdatedAt       = DateTime.UtcNow,
+                });
+        }
+        await db.SaveChangesAsync();
+        return newRoute;
     }
 }

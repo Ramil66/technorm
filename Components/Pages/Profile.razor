@@ -24,7 +24,6 @@ else if (currentUser is not null)
         <div class="col-lg-4">
             <div class="card mb-4">
                 <div class="card-body text-center" style="padding:28px;">
-                    <!-- Аватар с инициалами -->
                     <div style="width:72px;height:72px;border-radius:50%;background:var(--tn-blue);color:#fff;
                                 display:flex;align-items:center;justify-content:center;font-size:24px;font-weight:700;
                                 margin:0 auto 16px;">
@@ -52,7 +51,6 @@ else if (currentUser is not null)
                 </div>
             </div>
 
-            <!-- Мини-статистика -->
             @if (stats is not null)
             {
                 <div class="card">
@@ -89,92 +87,83 @@ else if (currentUser is not null)
             }
         </div>
 
-        <!-- Правая колонка: тепловая карта + последние действия -->
+        <!-- Правая колонка: активность + последние действия -->
         <div class="col-lg-8">
-            <!-- Тепловая карта активности (только технолог) -->
-            <AuthorizeView Roles="technologist">
-                <Authorized>
-                    <div class="card mb-4">
-                        <div class="card-header">
-                            <i class="fa-solid fa-fire" style="color:var(--tn-blue);margin-right:6px;"></i>
-                            Активность за год
-                        </div>
-                        <div class="card-body">
-                            @{
-                                var ruCulture  = CultureInfo.GetCultureInfo("ru-RU");
-                                var today      = DateOnly.FromDateTime(DateTime.Today);
-                                var startDate  = today.AddDays(-364);
-                                int dow0 = ((int)startDate.DayOfWeek + 6) % 7;
-                                startDate = startDate.AddDays(-dow0);
+            <!-- Тепловая карта активности -->
+            <div class="card mb-4">
+                <div class="card-body" style="padding:16px;">
+                    <div style="font-size:13px;font-weight:600;color:var(--tn-text-muted);margin-bottom:10px;">
+                        <i class="fa-solid fa-fire me-1" style="color:var(--tn-blue);"></i>
+                        Активность за год
+                    </div>
+                    @{
+                        var ruCulture  = CultureInfo.GetCultureInfo("ru-RU");
+                        var today      = DateOnly.FromDateTime(DateTime.Today);
+                        var oneYearAgo = today.AddYears(-1);
+                        int startDow   = ((int)oneYearAgo.DayOfWeek + 6) % 7;
+                        var startDate  = oneYearAgo.AddDays(-startDow);
 
-                                // Build weeks list
-                                var weeks = new List<DateOnly>();
-                                for (var wk = startDate; wk <= today; wk = wk.AddDays(7))
-                                    weeks.Add(wk);
+                        var weeks = new List<DateOnly>();
+                        for (var wk = startDate; wk <= today; wk = wk.AddDays(7))
+                            weeks.Add(wk);
 
-                                // Month label per column (show when month changes)
-                                var monthLabels = new string?[weeks.Count];
-                                int prevMonth = -1;
-                                for (int wi = 0; wi < weeks.Count; wi++)
-                                {
-                                    if (weeks[wi].Month != prevMonth)
-                                    {
-                                        monthLabels[wi] = ruCulture.DateTimeFormat.AbbreviatedMonthNames[weeks[wi].Month - 1];
-                                        prevMonth = weeks[wi].Month;
-                                    }
-                                }
+                        var monthLabels = new string?[weeks.Count];
+                        int prevMonth = -1;
+                        for (int wi = 0; wi < weeks.Count; wi++)
+                        {
+                            if (weeks[wi].Month != prevMonth)
+                            {
+                                monthLabels[wi] = ruCulture.DateTimeFormat.AbbreviatedMonthNames[weeks[wi].Month - 1];
+                                prevMonth = weeks[wi].Month;
                             }
-                            <div class="heatmap-outer">
-                                <!-- Month labels row -->
-                                <div class="heatmap-months">
-                                    @for (int wi = 0; wi < weeks.Count; wi++)
+                        }
+                    }
+                    <div class="heatmap-outer">
+                        <div class="heatmap-months">
+                            @for (int wi = 0; wi < weeks.Count; wi++)
+                            {
+                                <div class="heatmap-month-label">@(monthLabels[wi] ?? "")</div>
+                            }
+                        </div>
+                        <div class="heatmap-grid">
+                            @for (int wi = 0; wi < weeks.Count; wi++)
+                            {
+                                var wkStart = weeks[wi];
+                                <div class="heatmap-week">
+                                    @for (int d = 0; d < 7; d++)
                                     {
-                                        <div class="heatmap-month-label" style="width:16px;flex-shrink:0;">
-                                            @(monthLabels[wi] ?? "")
+                                        var day = wkStart.AddDays(d);
+                                        if (day > today) { break; }
+                                        int count = activityMap.TryGetValue(day, out var c) ? c : 0;
+                                        string cls = count == 0 ? "" :
+                                                     count == 1 ? "lv1" :
+                                                     count <= 3 ? "lv2" :
+                                                     count <= 6 ? "lv3" :
+                                                     count <= 10 ? "lv4" : "lv5";
+                                        <div class="heatmap-cell-wrap">
+                                            <div class="heatmap-cell heatmap-cell-grid @cls"></div>
+                                            <div class="heatmap-tooltip">
+                                                @day.ToString("dd MMM yyyy", ruCulture)<br/>
+                                                @count @(count == 1 ? "действие" : count is >= 2 and <= 4 ? "действия" : "действий")
+                                            </div>
                                         </div>
                                     }
                                 </div>
-                                <!-- Cells grid -->
-                                <div class="heatmap-grid">
-                                    @for (int wi = 0; wi < weeks.Count; wi++)
-                                    {
-                                        var wkStart = weeks[wi];
-                                        <div class="heatmap-week">
-                                            @for (int d = 0; d < 7; d++)
-                                            {
-                                                var day   = wkStart.AddDays(d);
-                                                int count = activityMap.TryGetValue(day, out var c) ? c : 0;
-                                                string cls = count == 0 ? "" :
-                                                             count == 1 ? "lv1" :
-                                                             count <= 3 ? "lv2" :
-                                                             count <= 6 ? "lv3" :
-                                                             count <= 10 ? "lv4" : "lv5";
-                                                <div class="heatmap-cell-wrap">
-                                                    <div class="heatmap-cell @cls"></div>
-                                                    <div class="heatmap-tooltip">
-                                                        @day.ToString("dd MMM yyyy", ruCulture)<br/>
-                                                        @count @(count == 1 ? "событие" : count is >= 2 and <= 4 ? "события" : "событий")
-                                                    </div>
-                                                </div>
-                                            }
-                                        </div>
-                                    }
-                                </div>
-                            </div>
-                            <div class="d-flex align-items-center gap-2 mt-2" style="font-size:11px;color:var(--tn-text-muted);">
-                                <span>Меньше</span>
-                                <div class="heatmap-cell"></div>
-                                <div class="heatmap-cell lv1"></div>
-                                <div class="heatmap-cell lv2"></div>
-                                <div class="heatmap-cell lv3"></div>
-                                <div class="heatmap-cell lv4"></div>
-                                <div class="heatmap-cell lv5"></div>
-                                <span>Больше</span>
-                            </div>
+                            }
                         </div>
                     </div>
-                </Authorized>
-            </AuthorizeView>
+                    <div class="d-flex align-items-center gap-2 mt-2" style="font-size:11px;color:var(--tn-text-muted);">
+                        <span>Меньше</span>
+                        <div class="heatmap-cell"></div>
+                        <div class="heatmap-cell lv1"></div>
+                        <div class="heatmap-cell lv2"></div>
+                        <div class="heatmap-cell lv3"></div>
+                        <div class="heatmap-cell lv4"></div>
+                        <div class="heatmap-cell lv5"></div>
+                        <span>Больше</span>
+                    </div>
+                </div>
+            </div>
 
             <!-- Последние действия -->
             <div class="card">
@@ -219,21 +208,28 @@ else if (currentUser is not null)
 @code {
     [CascadingParameter] private Task<AuthenticationState> AuthStateTask { get; set; } = default!;
 
-    private bool          isLoading = true;
-    private User?         currentUser;
+    private bool              isLoading = true;
+    private User?             currentUser;
     private UserProfileStats? stats;
     private Dictionary<DateOnly, int> activityMap  = [];
     private List<AuditLog>            recentActions = [];
 
+    private int _userId;
+
     protected override async Task OnInitializedAsync()
     {
-        var state  = await AuthStateTask;
-        var userId = int.Parse(state.User.FindFirst("UserId")?.Value ?? "0");
+        var state = await AuthStateTask;
+        _userId   = int.Parse(state.User.FindFirst("UserId")?.Value ?? "0");
+        await LoadDataAsync();
+    }
 
-        var t1 = UserSvc.GetByIdAsync(userId);
-        var t2 = Dashboard.GetUserStatsAsync(userId);
-        var t3 = Dashboard.GetUserActivityAsync(userId);
-        var t4 = Dashboard.GetUserRecentActionsAsync(userId, 15);
+    private async Task LoadDataAsync()
+    {
+        isLoading = true;
+        var t1 = UserSvc.GetByIdAsync(_userId);
+        var t2 = Dashboard.GetUserStatsAsync(_userId);
+        var t3 = Dashboard.GetUserActivityAsync(_userId);
+        var t4 = Dashboard.GetUserRecentActionsAsync(_userId, 15);
         await Task.WhenAll(t1, t2, t3, t4);
 
         currentUser   = t1.Result;

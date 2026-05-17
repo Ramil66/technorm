@@ -10,134 +10,162 @@
 @inject IMaterialService MatSvc
 @inject IOperationService OpSvc
 @inject IRouteBuilderService RouteBuildSvc
+@inject IAuditLogService AuditSvc
 
 <PageTitle>НСИ — ТехНорм</PageTitle>
 
 <div class="page-header">
-    <h1><i class="fa-solid fa-diagram-project" style="color:var(--tn-blue);margin-right:10px;font-size:18px;"></i>НСИ</h1>
+    <h1><i class="fa-solid fa-route" style="color:var(--tn-blue);margin-right:10px;font-size:18px;"></i>Маршрутные карты</h1>
 </div>
 
-<!-- Вкладки -->
-<div class="tn-tabs">
-    @foreach (var (label, icon, idx) in Tabs)
-    {
-        <button class="tn-tab @(activeTab == idx ? "active" : "")" @onclick="() => SetTab(idx)">
-            <i class="@icon me-1"></i>@label
-        </button>
-    }
-</div>
+<div class="mk-canvas">
 
-@if (activeTab == 0)
-{
-    <div class="mk-canvas">
-        <!-- ── Горизонтальная панель управления ── -->
-        <div class="mk-topbar">
-            <div class="mk-topbar-main">
-                <div class="mk-topbar-title">
-                    <i class="fa-solid fa-route" style="color:var(--tn-blue);"></i>
-                    Маршрутные карты
-                </div>
+    <!-- ══════════ Две отдельные панели управления ══════════ -->
+    <div style="display:flex;gap:16px;flex-wrap:wrap;flex-shrink:0;align-items:flex-start;width:100%;">
 
-                <div class="mk-topbar-select">
-                    <span style="font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:.05em;color:var(--tn-text-muted);white-space:nowrap;">Изделие</span>
-                    <select class="form-select form-select-sm" style="min-width:220px;" @bind="routeProductId" @bind:after="LoadProductRoutes">
-                        <option value="0">— выберите изделие —</option>
-                        @foreach (var p in allProducts)
-                        {
-                            <option value="@p.Id">@p.Name</option>
-                        }
-                    </select>
-                </div>
+        <!-- Панель 1: выбор изделия -->
+        <div class="mk-topbar" style="flex:none;width:fit-content;">
+            <div class="d-flex align-items-center gap-2 flex-wrap">
 
-                @if (routeProductId > 0)
-                {
-                    @if (productRoutes.Any())
+                <!-- Кастомный dropdown -->
+                <div style="position:relative;">
+                    <button class="product-picker-toggle" @onclick="ToggleProductDropdown">
+                        <i class="fa-solid fa-box" style="font-size:11px;color:var(--tn-blue);"></i>
+                        <span style="max-width:220px;overflow:hidden;text-overflow:ellipsis;">@SelectedProductName</span>
+                        <i class="fa-solid fa-chevron-down" style="font-size:9px;color:var(--tn-text-muted);"></i>
+                    </button>
+
+                    @if (showProductDropdown)
                     {
-                        <div class="mk-topbar-stat">
-                            @{ var pubCnt = productRoutes.Count(r => r.Status == "published"); }
-                            <span><strong>@productRoutes.Count</strong> маршрут(ов)</span>
-                            @if (pubCnt > 0)
+                        <div style="position:fixed;inset:0;z-index:999;" @onclick="CloseProductDropdown"></div>
+                        <div class="product-picker-menu">
+                            @foreach (var p in allProducts)
                             {
-                                <span class="badge-status badge-published" style="font-size:10px;">@pubCnt осн.</span>
+                                <div class="product-picker-item @(routeProductId == p.Id ? "selected" : "")">
+                                    <span class="product-picker-name" @onclick="() => SelectProduct(p)">
+                                        @p.Name
+                                        @if (p.TechRoutes.Count > 0)
+                                        {
+                                            <small style="color:var(--tn-text-muted);font-weight:400;margin-left:4px;">
+                                                (@p.TechRoutes.Count)
+                                            </small>
+                                        }
+                                    </span>
+                                    <div class="product-picker-actions">
+                                        <button title="Информация об изделии"
+                                                @onclick:stopPropagation @onclick="() => ShowProductInfo(p)">
+                                            <i class="fa-solid fa-circle-question"></i>
+                                        </button>
+                                    </div>
+                                </div>
                             }
                         </div>
                     }
+                </div>
 
-                    <div class="d-flex gap-2 align-items-center">
-                        <AuthorizeView Roles="technologist">
-                            <Authorized>
-                                <button class="btn btn-primary btn-sm" @onclick="AutoBuildRoute" disabled="@isMining">
-                                    @if (isMining)
-                                    {
-                                        <span class="spinner-border spinner-border-sm me-1" role="status"></span>
-                                    }
-                                    else
-                                    {
-                                        <i class="fa-solid fa-wand-magic-sparkles me-1"></i>
-                                    }
-                                    Построить из событий
-                                </button>
-                            </Authorized>
-                        </AuthorizeView>
-                        <AuthorizeView Roles="technologist">
-                            <Authorized>
-                                <button class="btn btn-outline-primary btn-sm" @onclick="ShowCreateRouteModalFromTab0">
-                                    <i class="fa-solid fa-plus me-1"></i>Создать вручную
-                                </button>
-                            </Authorized>
-                        </AuthorizeView>
-                    </div>
+                <!-- разделитель -->
+                <div style="width:1px;height:26px;background:var(--tn-border);flex-shrink:0;"></div>
+
+                <!-- + новое изделие -->
+                <AuthorizeView Roles="technologist">
+                    <Authorized>
+                        <button class="btn btn-sm btn-outline-primary" title="Добавить изделие"
+                                @onclick="ShowAddProductModal">
+                            <i class="fa-solid fa-plus me-1"></i>Новое изделие
+                        </button>
+                    </Authorized>
+                </AuthorizeView>
+
+                @if (routeProductId > 0 && productRoutes.Any())
+                {
+                    <span style="font-size:12px;color:var(--tn-text-muted);">
+                        <strong>@productRoutes.Count</strong> МК
+                    </span>
                 }
             </div>
-
-            @if (minerError is not null)
-            {
-                <div class="alert alert-danger py-2 mb-0 mt-2" style="font-size:12px;">
-                    <i class="fa-solid fa-circle-exclamation me-1"></i>@minerError
-                </div>
-            }
         </div>
 
-        <!-- ── Область маршрутов ── -->
-        <div class="mk-routes-area">
-            @if (routeProductId == 0)
-            {
-                <div class="empty-state" style="border:none;padding-top:80px;">
-                    <i class="fa-solid fa-diagram-project d-block" style="opacity:.2;"></i>
-                    <div>Выберите изделие для просмотра маршрутных карт</div>
+        <!-- Панель 2: создание маршрутов (только при выбранном изделии) -->
+        @if (routeProductId > 0)
+        {
+            <div class="mk-topbar" style="flex-shrink:0;align-self:flex-start;margin-left:auto;">
+                <div class="d-flex gap-2 align-items-center">
+                    <AuthorizeView Roles="technologist">
+                        <Authorized>
+                            <button class="btn btn-primary btn-sm" @onclick="AutoBuildRoute" disabled="@isMining">
+                                @if (isMining)
+                                {
+                                    <span class="spinner-border spinner-border-sm me-1" role="status"></span>
+                                }
+                                else
+                                {
+                                    <i class="fa-solid fa-wand-magic-sparkles me-1"></i>
+                                }
+                                Построить из событий
+                            </button>
+                            <button class="btn btn-outline-primary btn-sm" @onclick="ShowCreateRouteModalFromTab0">
+                                <i class="fa-solid fa-plus me-1"></i>Создать вручную
+                            </button>
+                        </Authorized>
+                    </AuthorizeView>
                 </div>
-            }
-            else if (!productRoutes.Any())
-            {
-                <div class="empty-state" style="border:none;padding-top:80px;">
-                    <i class="fa-solid fa-route d-block" style="opacity:.2;"></i>
-                    <div>Маршрутных карт нет</div>
-                    <div style="font-size:12px;color:var(--tn-text-muted);margin-top:8px;">
-                        Загрузите события и нажмите «Построить из событий»
-                    </div>
-                </div>
-            }
-            else
-            {
-                @foreach (var (route, routeIdx) in productRoutes
-                    .OrderByDescending(r => r.Status == "published")
-                    .ThenByDescending(r => r.Version)
-                    .Select((r, i) => (r, i + 1)))
-                {
-                    bool isExpanded = expandedRouteId == route.Id;
-                    bool isMain     = route.Status == "published";
-                    routeMetricsCache.TryGetValue(route.Id, out var metrics);
+            </div>
+        }
+    </div>
 
-                    <div class="mk-route-block @(isMain ? "mk-route-block-main" : "")">
-                        <!-- Заголовок маршрута -->
-                        <div class="mk-route-header" @onclick="() => ToggleRoute(route)">
+    @if (minerError is not null)
+    {
+        <div class="alert alert-danger py-2 mb-0" style="font-size:12px;flex-shrink:0;">
+            <i class="fa-solid fa-circle-exclamation me-1"></i>@minerError
+        </div>
+    }
+
+    <!-- ══════════ Область маршрутов ══════════ -->
+    <div class="mk-routes-area">
+        @if (routeProductId == 0)
+        {
+            <div class="empty-state" style="border:none;padding-top:80px;">
+                <i class="fa-solid fa-diagram-project d-block" style="opacity:.2;"></i>
+                <div>Выберите изделие для просмотра маршрутных карт</div>
+            </div>
+        }
+        else if (!productRoutes.Any())
+        {
+            <div class="empty-state" style="border:none;padding-top:80px;">
+                <i class="fa-solid fa-route d-block" style="opacity:.2;"></i>
+                <div>Маршрутных карт нет</div>
+                <div style="font-size:12px;color:var(--tn-text-muted);margin-top:8px;">
+                    Загрузите события и нажмите «Построить из событий»
+                </div>
+            </div>
+        }
+        else
+        {
+            @foreach (var route in productRoutes
+                .OrderByDescending(r => r.Status == "published")
+                .ThenByDescending(r => r.Version))
+            {
+                bool isExpanded = expandedRouteIds.Contains(route.Id);
+                bool isMain     = route.Status == "published";
+                bool isLoading  = loadingRouteIds.Contains(route.Id);
+                routeStepsCache.TryGetValue(route.Id, out var routeSteps);
+                routeMetricsCache.TryGetValue(route.Id, out var metrics);
+
+                <div class="mk-route-block @(isMain ? "mk-route-block-main" : "")">
+
+                    <!-- Заголовок маршрута (двухрядный) -->
+                    <div class="mk-route-header" @onclick="() => ToggleRoute(route)">
+
+                        <!-- Ряд 1: основная информация -->
+                        <div class="mk-route-row-main">
                             <div class="route-radio @(isMain ? "active" : "")" style="flex-shrink:0;"></div>
-                            <span class="mk-route-num" title="@route.Name">@TruncText(route.Name, 32)</span>
-                            <span style="font-size:11px;color:var(--tn-text-muted);white-space:nowrap;">v@route.Version</span>
+                            <span class="mk-route-num" title="@route.Name">@TruncText(route.Name, 36)</span>
 
                             @if (isMain)
                             {
-                                <span class="mk-badge mk-badge-main"><i class="fa-solid fa-star me-1" style="font-size:9px;"></i>Основной</span>
+                                <span class="mk-badge mk-badge-main">
+                                    <i class="fa-solid fa-star me-1" style="font-size:9px;"></i>Основной
+                                </span>
                             }
                             else
                             {
@@ -150,7 +178,7 @@
                                 {
                                     <span class="mk-metric"><i class="fa-regular fa-clock"></i>@metrics.TotalAvgMin мин.</span>
                                 }
-                                <span class="mk-metric"><i class="fa-solid fa-list-ol"></i>ОП — @metrics.StepCount</span>
+                                <span class="mk-metric"><i class="fa-solid fa-list-ol"></i>@metrics.StepCount оп.</span>
                                 @if (metrics.ResourceCount > 0)
                                 {
                                     <span class="mk-metric"><i class="fa-solid fa-screwdriver-wrench"></i>@metrics.ResourceCount рес.</span>
@@ -160,13 +188,8 @@
                                     <span class="mk-metric"><i class="fa-solid fa-percent"></i>ЧИ @metrics.Confidence%</span>
                                 }
                             }
-                            else
-                            {
-                                <span style="font-size:12px;color:var(--tn-text-muted);">
-                                    v@route.Version · @route.CreatedAt.ToLocalTime().ToString("dd.MM.yyyy")
-                                </span>
-                            }
 
+                            <!-- Кнопки управления -->
                             <div class="ms-auto d-flex gap-1 align-items-center" @onclick:stopPropagation>
                                 @if (!isMain)
                                 {
@@ -181,14 +204,34 @@
                                 }
                                 <AuthorizeView Roles="technologist">
                                     <Authorized>
+                                        <button class="btn btn-sm btn-outline-secondary py-0 px-2"
+                                                title="Переименовать" @onclick="() => PrepareRenameRoute(route)">
+                                            <i class="fa-solid fa-pen-to-square"></i>
+                                        </button>
                                         <button class="btn btn-sm btn-outline-primary py-0 px-2"
                                                 title="Добавить шаг" @onclick="() => PrepareAddStep(route)">
                                             <i class="fa-solid fa-plus"></i>
                                         </button>
-                                    </Authorized>
-                                </AuthorizeView>
-                                <AuthorizeView Roles="technologist">
-                                    <Authorized>
+                                        <button class="btn btn-sm btn-outline-secondary py-0 px-2"
+                                                title="Дублировать" @onclick="() => DuplicateRoute(route)">
+                                            <i class="fa-solid fa-copy"></i>
+                                        </button>
+                                        @if (route.SourceEventCount.HasValue)
+                                        {
+                                            <button class="btn btn-sm btn-outline-success py-0 px-2"
+                                                    title="Перестроить маршрут из событий"
+                                                    @onclick="() => RebuildRoute(route)"
+                                                    disabled="@rebuildingRouteIds.Contains(route.Id)">
+                                                @if (rebuildingRouteIds.Contains(route.Id))
+                                                {
+                                                    <span class="spinner-border spinner-border-sm" role="status"></span>
+                                                }
+                                                else
+                                                {
+                                                    <i class="fa-solid fa-rotate"></i>
+                                                }
+                                            </button>
+                                        }
                                         <button class="btn btn-sm btn-outline-danger py-0 px-2"
                                                 title="Удалить маршрут" @onclick="() => DeleteRoute(route)">
                                             <i class="fa-solid fa-trash-can"></i>
@@ -200,370 +243,246 @@
                                style="color:var(--tn-text-muted);flex-shrink:0;"></i>
                         </div>
 
-                        <!-- Развёрнутое содержимое: горизонтальная карта шагов -->
-                        @if (isExpanded)
+                        <!-- Ряд 2: метаданные -->
+                        <div class="mk-route-row-meta">
+                            <span class="mk-route-meta-item">
+                                <i class="fa-solid fa-code-branch" style="font-size:10px;"></i>
+                                v@route.Version
+                            </span>
+                            <span class="mk-route-meta-item">
+                                <i class="fa-regular fa-calendar" style="font-size:10px;"></i>
+                                Создан: @route.CreatedAt.ToLocalTime().ToString("dd.MM.yyyy HH:mm")
+                            </span>
+                            <span class="mk-route-meta-item">
+                                <i class="fa-solid fa-pen-to-square" style="font-size:10px;"></i>
+                                Обновлён: @route.UpdatedAt.ToLocalTime().ToString("dd.MM.yyyy HH:mm")
+                            </span>
+                            <span class="mk-route-meta-item">
+                                <i class="fa-solid fa-database" style="font-size:10px;"></i>
+                                Источник: @(route.SourceEventCount.HasValue ? $"{route.SourceEventCount} событий" : "ручной ввод")
+                            </span>
+                        </div>
+                    </div>
+
+                    <!-- Развёрнутое содержимое -->
+                    @if (isExpanded)
+                    {
+                        @if (isLoading)
                         {
-                            @if (isLoadingSteps)
+                            <div class="d-flex align-items-center gap-2 p-4">
+                                <div class="spinner-border spinner-border-sm text-primary" role="status"></div>
+                                <span style="font-size:13px;">Загрузка шагов...</span>
+                            </div>
+                        }
+                        else if (routeSteps is null || !routeSteps.Any())
+                        {
+                            <div class="empty-state py-4" style="border:none;">
+                                <i class="fa-solid fa-circle-nodes d-block" style="font-size:28px;"></i>
+                                <div>Маршрут не содержит шагов</div>
+                            </div>
+                        }
+                        else
+                        {
+                            <!-- Сводная строка -->
+                            @if (metrics is not null)
                             {
-                                <div class="d-flex align-items-center gap-2 p-4">
-                                    <div class="spinner-border spinner-border-sm text-primary" role="status"></div>
-                                    <span style="font-size:13px;">Загрузка шагов...</span>
+                                <div class="mk-steps-summary">
+                                    @if (metrics.TotalAvgMin > 0)
+                                    {
+                                        <span class="mk-summary-chip">
+                                            <i class="fa-regular fa-clock" style="color:var(--tn-blue);"></i>
+                                            Итого: <strong>@metrics.TotalAvgMin мин.</strong>
+                                        </span>
+                                    }
+                                    @foreach (var (resName, pct) in metrics.ResourceBreakdown.Take(4))
+                                    {
+                                        <span class="mk-summary-chip">
+                                            <i class="fa-solid fa-screwdriver-wrench" style="color:#94a3b8;font-size:11px;"></i>
+                                            @resName: <strong>@pct%</strong>
+                                        </span>
+                                    }
+                                    @if (metrics.Confidence > 0)
+                                    {
+                                        <span class="mk-summary-chip ms-auto">
+                                            <i class="fa-solid fa-percent" style="color:#94a3b8;font-size:11px;"></i>
+                                            ЧИ (ср.): <strong>@metrics.Confidence%</strong>
+                                        </span>
+                                    }
                                 </div>
                             }
-                            else if (!expandedRouteSteps.Any())
+
+                            <!-- Уведомление об отличиях от основного -->
+                            @if (!isMain && mainRouteSteps.Any())
                             {
-                                <div class="empty-state py-4" style="border:none;">
-                                    <i class="fa-solid fa-circle-nodes d-block" style="font-size:28px;"></i>
-                                    <div>Маршрут не содержит шагов</div>
-                                </div>
-                            }
-                            else
-                            {
-                                <!-- Сводная строка -->
-                                @if (metrics is not null)
+                                var fullDiffCnt  = routeSteps.Count(s => GetStepDiff(s) == DiffLevel.FullDiff);
+                                var normsDiffCnt = routeSteps.Count(s => GetStepDiff(s) == DiffLevel.NormsDiff);
+                                var mainRoute2   = productRoutes.FirstOrDefault(r => r.Status == "published");
+                                routeMetricsCache.TryGetValue(mainRoute2?.Id ?? 0, out var mainM);
+                                var timeDiff = (metrics is not null && mainM is not null)
+                                    ? metrics.TotalAvgMin - mainM.TotalAvgMin
+                                    : (decimal?)null;
+                                @if (fullDiffCnt > 0 || normsDiffCnt > 0 || timeDiff.HasValue)
                                 {
-                                    <div class="mk-steps-summary">
-                                        @if (metrics.TotalAvgMin > 0)
+                                    <div class="mk-diff-notice">
+                                        <i class="fa-solid fa-circle-exclamation"></i>
+                                        Отличия от основного:
+                                        @if (fullDiffCnt > 0)
                                         {
-                                            <span class="mk-summary-chip">
-                                                <i class="fa-regular fa-clock" style="color:var(--tn-blue);"></i>
-                                                Итого: <strong>@metrics.TotalAvgMin мин.</strong>
+                                            <span style="background:#fee2e2;color:#dc2626;border-radius:4px;padding:0 6px;">
+                                                @fullDiffCnt шаг(ов) — другая операция
                                             </span>
                                         }
-                                        @foreach (var (resName, pct) in metrics.ResourceBreakdown.Take(4))
+                                        @if (normsDiffCnt > 0)
                                         {
-                                            <span class="mk-summary-chip">
-                                                <i class="fa-solid fa-screwdriver-wrench" style="color:#94a3b8;font-size:11px;"></i>
-                                                @resName: <strong>@pct%</strong>
+                                            <span style="background:#fef3c7;color:#d97706;border-radius:4px;padding:0 6px;">
+                                                @normsDiffCnt шаг(ов) — другие нормы/ресурсы
                                             </span>
                                         }
-                                        @if (metrics.Confidence > 0)
+                                        @if (timeDiff.HasValue && mainM!.TotalAvgMin > 0)
                                         {
-                                            <span class="mk-summary-chip ms-auto">
-                                                <i class="fa-solid fa-percent" style="color:#94a3b8;font-size:11px;"></i>
-                                                ЧИ (ср.): <strong>@metrics.Confidence%</strong>
+                                            var pct  = Math.Round(timeDiff.Value / mainM.TotalAvgMin * 100, 1);
+                                            var sign = timeDiff.Value >= 0 ? "+" : "";
+                                            <span style="background:#eff6ff;color:#1d4ed8;border-radius:4px;padding:0 6px;">
+                                                <i class="fa-regular fa-clock"></i>
+                                                Время: @sign@timeDiff.Value.ToString("F1") мин (@sign@pct.ToString("F1")%)
                                             </span>
                                         }
                                     </div>
                                 }
-
-                                <!-- Горизонтальный поток шагов (с поддержкой параллельных операций) -->
-                                <div class="mk-steps-flow">
-                                    @foreach (var (stepGroup, gi) in expandedRouteSteps
-                                        .GroupBy(s => s.SequenceNum)
-                                        .OrderBy(g => g.Key)
-                                        .Select((g, i) => (g.ToList(), i)))
-                                    {
-                                        @if (gi > 0)
-                                        {
-                                            <div class="mk-step-arrow">
-                                                <i class="fa-solid fa-arrow-right"></i>
-                                            </div>
-                                        }
-
-                                        @if (stepGroup.Count > 1)
-                                        {
-                                            <div class="mk-parallel-group">
-                                                @foreach (var step in stepGroup)
-                                                {
-                                                    bool sel     = selectedStep?.Id == step.Id;
-                                                    var  sName   = step.Operation?.Name ?? step.Description ?? "—";
-                                                    var  stepTot = step.TimeNorms.Sum(tn => tn.NormValue);
-
-                                                    <div class="mk-step-card @(sel ? "selected" : "")"
-                                                         @onclick="() => SelectStep(step)">
-                                                        <div class="mk-step-num">Операция @step.SequenceNum</div>
-                                                        <div class="mk-step-name" title="@sName">@TruncText(sName, 24)</div>
-                                                        @if (step.Operation?.Code is not null)
-                                                        {
-                                                            <div class="mk-step-code">@step.Operation.Code</div>
-                                                        }
-                                                        @if (step.TimeNorms.Any())
-                                                        {
-                                                            <div class="mk-step-divider"></div>
-                                                            @foreach (var tn in step.TimeNorms.OrderByDescending(t => t.NormValue))
-                                                            {
-                                                                var resPct = stepTot > 0 ? (int)Math.Round(tn.NormValue / stepTot * 100) : 0;
-                                                                <div class="mk-step-resource">
-                                                                    <i class="fa-solid fa-gear" style="flex-shrink:0;font-size:10px;"></i>
-                                                                    <span class="mk-res-name">@(tn.Resource?.Name ?? "Общая")</span>
-                                                                    @if (step.TimeNorms.Count > 1) { <span class="mk-res-pct">@resPct%</span> }
-                                                                </div>
-                                                                <div class="mk-step-time">
-                                                                    <i class="fa-regular fa-clock" style="flex-shrink:0;font-size:10px;"></i>
-                                                                    @tn.NormValue мин / 1 ед.
-                                                                </div>
-                                                            }
-                                                        }
-                                                        else { <div class="mk-step-no-norm">Нормы не заданы</div> }
-                                                        @if (sel)
-                                                        {
-                                                            <div @onclick:stopPropagation style="margin-top:8px;display:flex;flex-direction:column;gap:4px;">
-                                                                <AuthorizeView Roles="technologist">
-                                                                    <Authorized>
-                                                                        <button class="btn btn-sm btn-outline-primary py-0 px-2 w-100" @onclick="() => PrepareEditStep(step)">
-                                                                            <i class="fa-solid fa-pen me-1"></i>Редактировать
-                                                                        </button>
-                                                                        <button class="btn btn-sm btn-outline-danger py-0 px-2 w-100" @onclick="DeleteSelectedStep">
-                                                                            <i class="fa-solid fa-trash-can me-1"></i>Удалить
-                                                                        </button>
-                                                                    </Authorized>
-                                                                </AuthorizeView>
-                                                            </div>
-                                                        }
-                                                    </div>
-                                                }
-                                            </div>
-                                        }
-                                        else
-                                        {
-                                            var step     = stepGroup[0];
-                                            bool sel     = selectedStep?.Id == step.Id;
-                                            var  sName   = step.Operation?.Name ?? step.Description ?? "—";
-                                            var  stepTot = step.TimeNorms.Sum(tn => tn.NormValue);
-
-                                            <div class="mk-step-card @(sel ? "selected" : "")"
-                                                 @onclick="() => SelectStep(step)">
-                                                <div class="mk-step-num">Операция @step.SequenceNum</div>
-                                                <div class="mk-step-name" title="@sName">@TruncText(sName, 24)</div>
-
-                                                @if (step.Operation?.Code is not null)
-                                                {
-                                                    <div class="mk-step-code">@step.Operation.Code</div>
-                                                }
-
-                                                @if (step.TimeNorms.Any())
-                                                {
-                                                    <div class="mk-step-divider"></div>
-                                                    @foreach (var tn in step.TimeNorms.OrderByDescending(t => t.NormValue))
-                                                    {
-                                                        var resPct = stepTot > 0
-                                                            ? (int)Math.Round(tn.NormValue / stepTot * 100)
-                                                            : 0;
-                                                        <div class="mk-step-resource">
-                                                            <i class="fa-solid fa-gear" style="flex-shrink:0;font-size:10px;"></i>
-                                                            <span class="mk-res-name">@(tn.Resource?.Name ?? "Общая")</span>
-                                                            @if (step.TimeNorms.Count > 1)
-                                                            {
-                                                                <span class="mk-res-pct">@resPct%</span>
-                                                            }
-                                                        </div>
-                                                        <div class="mk-step-time">
-                                                            <i class="fa-regular fa-clock" style="flex-shrink:0;font-size:10px;"></i>
-                                                            @tn.NormValue мин / 1 ед.
-                                                        </div>
-                                                    }
-                                                }
-                                                else
-                                                {
-                                                    <div class="mk-step-no-norm">Нормы не заданы</div>
-                                                }
-
-                                                @if (sel)
-                                                {
-                                                    <div @onclick:stopPropagation style="margin-top:8px;display:flex;flex-direction:column;gap:4px;">
-                                                        <AuthorizeView Roles="technologist">
-                                                            <Authorized>
-                                                                <button class="btn btn-sm btn-outline-primary py-0 px-2 w-100"
-                                                                        @onclick="() => PrepareEditStep(step)">
-                                                                    <i class="fa-solid fa-pen me-1"></i>Редактировать
-                                                                </button>
-                                                                <button class="btn btn-sm btn-outline-danger py-0 px-2 w-100"
-                                                                        @onclick="DeleteSelectedStep">
-                                                                    <i class="fa-solid fa-trash-can me-1"></i>Удалить
-                                                                </button>
-                                                            </Authorized>
-                                                        </AuthorizeView>
-                                                    </div>
-                                                }
-                                            </div>
-                                        }
-                                    }
-                                </div>
                             }
+
+                            <!-- Горизонтальный поток шагов (всегда последовательно) -->
+                            <div class="mk-steps-flow">
+                                @{ int stepIdx = 0; }
+                                @foreach (var step in routeSteps.OrderBy(s => s.SequenceNum).ThenBy(s => s.Id))
+                                {
+                                    @if (stepIdx > 0)
+                                    {
+                                        <div class="mk-step-arrow">
+                                            <i class="fa-solid fa-arrow-right"></i>
+                                        </div>
+                                    }
+                                    stepIdx++;
+                                    var sel     = selectedStep?.Id == step.Id;
+                                    var diff    = !isMain ? GetStepDiff(step) : DiffLevel.None;
+                                    var diffCss = diff == DiffLevel.FullDiff  ? "diff"
+                                                : diff == DiffLevel.NormsDiff ? "norms-diff"
+                                                : "";
+                                    var sName   = step.Operation?.Name ?? step.Description ?? "—";
+                                    var tot     = step.TimeNorms.Sum(tn => tn.NormValue);
+                                    <div class="mk-step-card @(sel ? "selected" : "") @diffCss"
+                                         @onclick="() => SelectStep(step, route.Id)">
+                                        @StepCardInner(step, sName, tot, sel, route.Id, diff)
+                                    </div>
+                                }
+                            </div>
                         }
+                    }
+                </div>
+            }
+        }
+    </div>
+</div>
+
+<!-- ═══════════════ Информация об изделии ═══════════════ -->
+@if (showProductInfoModal && infoProduct is not null)
+{
+    <div class="tn-backdrop" @onclick="() => showProductInfoModal = false">
+        <div class="tn-modal" @onclick:stopPropagation style="max-width:360px;">
+
+            <div class="tn-modal-header">
+                <h5>@infoProduct.Name</h5>
+            </div>
+
+            <div style="display:flex;flex-direction:column;gap:12px;margin-bottom:20px;">
+                @if (!string.IsNullOrWhiteSpace(infoProduct.Code))
+                {
+                    <div>
+                        <div style="font-size:11px;color:var(--tn-text-muted);font-weight:500;text-transform:uppercase;letter-spacing:0.4px;margin-bottom:2px;">Код</div>
+                        <div style="font-size:14px;font-family:monospace;">@infoProduct.Code</div>
                     </div>
                 }
-            }
-        </div>
-    </div>
-}
+                <div>
+                    <div style="font-size:11px;color:var(--tn-text-muted);font-weight:500;text-transform:uppercase;letter-spacing:0.4px;margin-bottom:2px;">Тип</div>
+                    <div style="font-size:14px;">@ProductTypeLabel(infoProduct.Type)</div>
+                </div>
+                <div>
+                    <div style="font-size:11px;color:var(--tn-text-muted);font-weight:500;text-transform:uppercase;letter-spacing:0.4px;margin-bottom:2px;">Маршрутов</div>
+                    <div style="font-size:14px;">@infoProduct.TechRoutes.Count</div>
+                </div>
+                @if (!string.IsNullOrWhiteSpace(infoProduct.Description))
+                {
+                    <div>
+                        <div style="font-size:11px;color:var(--tn-text-muted);font-weight:500;text-transform:uppercase;letter-spacing:0.4px;margin-bottom:2px;">Описание</div>
+                        <div style="font-size:14px;">@infoProduct.Description</div>
+                    </div>
+                }
+                @{
+                    var infoMainRoute = infoProduct.TechRoutes
+                        .FirstOrDefault(r => r.Status == "published" && r.SourceEventCount.HasValue);
+                }
+                @if (infoMainRoute is not null)
+                {
+                    <div style="background:#f0f9ff;border:1px solid #bae6fd;border-radius:10px;
+                                padding:10px 14px;display:flex;align-items:center;gap:10px;">
+                        <input type="checkbox" style="width:15px;height:15px;cursor:pointer;flex-shrink:0;"
+                               checked="@infoMainRoute.IsAutoUpdate"
+                               @onchange="async e => await ToggleAutoUpdate(infoMainRoute, (bool)(e.Value ?? false))" />
+                        <div>
+                            <div style="font-size:13px;font-weight:500;color:#0369a1;">Автообновление маршрута</div>
+                            <div style="font-size:11px;color:#64748b;">Перестраивать при добавлении событий</div>
+                        </div>
+                    </div>
+                }
+            </div>
 
-@if (activeTab == 1)
-{
-    <div class="d-flex justify-content-between align-items-center mb-3">
-        <input class="form-control" style="max-width:280px;" placeholder="Поиск..." @bind="productSearch" @bind:after="FilterProducts" />
-        <AuthorizeView Roles="technologist">
-            <Authorized>
-                <button class="btn btn-primary btn-sm" @onclick="ShowAddProductModal">
-                    <i class="fa-solid fa-plus me-1"></i>Добавить изделие
+            <div class="tn-modal-footer">
+                <button class="btn btn-outline-danger" @onclick="() => DeleteProduct(infoProduct)">
+                    <i class="fa-solid fa-trash-can me-1"></i>Удалить
                 </button>
-            </Authorized>
-        </AuthorizeView>
-    </div>
-
-    <div class="card">
-        <div class="card-body p-0">
-            @if (!filteredProducts.Any())
-            {
-                <div class="empty-state"><i class="fa-solid fa-box d-block"></i><div>Изделий не найдено</div></div>
-            }
-            else
-            {
-                <table class="table table-hover mb-0">
-                    <thead>
-                        <tr>
-                            <th>Код</th>
-                            <th>Наименование</th>
-                            <th>Тип</th>
-                            <th>Маршрутов</th>
-                            <th>Описание</th>
-                            <th></th>
-                        </tr>
-                    </thead>
-                    <tbody>
-                        @foreach (var p in filteredProducts)
-                        {
-                            <tr>
-                                <td style="font-family:monospace;font-size:12px;">@p.Code</td>
-                                <td style="font-weight:500;">@p.Name</td>
-                                <td><span class="badge-status badge-new" style="font-size:11px;">@ProductTypeLabel(p.Type)</span></td>
-                                <td>@p.TechRoutes.Count</td>
-                                <td style="max-width:200px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:var(--tn-text-muted);">@p.Description</td>
-                                <td>
-                                    <div class="d-flex gap-1">
-                                        <button class="btn btn-sm btn-outline-secondary py-0 px-2"
-                                                title="Создать МК" @onclick="() => ShowCreateRouteModal(p)">
-                                            <i class="fa-solid fa-route"></i>
-                                        </button>
-                                        <AuthorizeView Roles="technologist">
-                                            <Authorized>
-                                                <button class="btn btn-sm btn-outline-primary py-0 px-2"
-                                                        title="Редактировать" @onclick="() => ShowEditProductModal(p)">
-                                                    <i class="fa-solid fa-pen"></i>
-                                                </button>
-                                            </Authorized>
-                                        </AuthorizeView>
-                                    </div>
-                                </td>
-                            </tr>
-                        }
-                    </tbody>
-                </table>
-            }
+                <button class="btn btn-secondary" @onclick="() => showProductInfoModal = false">Отмена</button>
+                <AuthorizeView Roles="technologist">
+                    <Authorized>
+                        <button class="btn btn-primary" @onclick="ShowEditFromInfo">
+                            <i class="fa-solid fa-pen me-1"></i>Редактировать
+                        </button>
+                    </Authorized>
+                </AuthorizeView>
+            </div>
         </div>
     </div>
 }
 
-@if (activeTab == 2)
+<!-- ═══════════════ Переименовать маршрут ═══════════════ -->
+@if (showRenameRouteModal && renamingRoute is not null)
 {
-    <div class="row g-2 mb-3 align-items-end">
-        <div class="col-md-4">
-            <label class="form-label">Фильтр по изделию</label>
-            <select class="form-select" @bind="timeNormFilter" @bind:after="LoadTimeNorms">
-                <option value="0">Все изделия</option>
-                @foreach (var p in allProducts)
-                {
-                    <option value="@p.Id">@p.Name</option>
-                }
-            </select>
-        </div>
-    </div>
-    <div class="card">
-        <div class="card-body p-0">
-            @if (!timeNorms.Any())
+    <div class="tn-backdrop" @onclick="() => showRenameRouteModal = false">
+        <div class="tn-modal" @onclick:stopPropagation style="max-width:420px;">
+            <div class="tn-modal-header">
+                <h5><i class="fa-solid fa-pen-to-square me-2" style="color:var(--tn-blue);"></i>Переименовать маршрут</h5>
+            </div>
+            <div class="mb-1">
+                <label class="form-label">Новое название</label>
+                <input class="form-control" @bind="renameValue" @bind:event="oninput" @bind:after="CheckRenameName" />
+            </div>
+            @if (renameConflict)
             {
-                <div class="empty-state"><i class="fa-solid fa-clock d-block"></i><div>Нормы времени не найдены</div></div>
+                <div class="text-warning small mb-3">
+                    <i class="fa-solid fa-triangle-exclamation me-1"></i>Маршрут с таким именем уже существует
+                </div>
             }
-            else
-            {
-                <table class="table table-hover mb-0">
-                    <thead>
-                        <tr>
-                            <th>№ шага</th>
-                            <th>Операция</th>
-                            <th>Изделие</th>
-                            <th>Ресурс</th>
-                            <th>Норма, мин</th>
-                            <th>Источник</th>
-                        </tr>
-                    </thead>
-                    <tbody>
-                        @foreach (var t in timeNorms)
-                        {
-                            <tr>
-                                <td>@t.RouteStep.SequenceNum</td>
-                                <td>@(t.RouteStep.Operation?.Name ?? t.RouteStep.Description ?? "—")</td>
-                                <td>@(t.RouteStep.Route?.Product?.Name ?? "—")</td>
-                                <td>@(t.Resource?.Name ?? "Общая")</td>
-                                <td style="font-weight:600;">@t.NormValue</td>
-                                <td>
-                                    <span class="badge-status @(t.IsManual ? "badge-new" : "badge-processed")" style="font-size:11px;">
-                                        @(t.IsManual ? "Ручная" : "Авто")
-                                    </span>
-                                </td>
-                            </tr>
-                        }
-                    </tbody>
-                </table>
-            }
+            else { <div class="mb-3"></div> }
+            <div class="tn-modal-footer">
+                <button class="btn btn-secondary" @onclick="() => showRenameRouteModal = false">Отмена</button>
+                <button class="btn btn-primary" @onclick="SaveRenameRoute">
+                    <i class="fa-solid fa-floppy-disk me-1"></i>Сохранить
+                </button>
+            </div>
         </div>
     </div>
 }
 
-<!-- ═══════════════ Вкладка 4: Нормы материалов ═══════════════ -->
-@if (activeTab == 3)
-{
-    <div class="row g-2 mb-3 align-items-end">
-        <div class="col-md-4">
-            <label class="form-label">Фильтр по изделию</label>
-            <select class="form-select" @bind="matNormFilter" @bind:after="LoadMatNorms">
-                <option value="0">Все изделия</option>
-                @foreach (var p in allProducts)
-                {
-                    <option value="@p.Id">@p.Name</option>
-                }
-            </select>
-        </div>
-    </div>
-    <div class="card">
-        <div class="card-body p-0">
-            @if (!matNorms.Any())
-            {
-                <div class="empty-state"><i class="fa-solid fa-cubes d-block"></i><div>Нормы материалов не найдены</div></div>
-            }
-            else
-            {
-                <table class="table table-hover mb-0">
-                    <thead>
-                        <tr>
-                            <th>№ шага</th>
-                            <th>Операция</th>
-                            <th>Изделие</th>
-                            <th>Материал</th>
-                            <th>Норма расхода</th>
-                            <th>Ед. изм.</th>
-                        </tr>
-                    </thead>
-                    <tbody>
-                        @foreach (var m in matNorms)
-                        {
-                            <tr>
-                                <td>@m.RouteStep.SequenceNum</td>
-                                <td>@(m.RouteStep.Operation?.Name ?? m.RouteStep.Description ?? "—")</td>
-                                <td>@(m.RouteStep.Route?.Product?.Name ?? "—")</td>
-                                <td>@(m.Material?.Name ?? "—")</td>
-                                <td style="font-weight:600;">@m.ConsumptionRate</td>
-                                <td>@(m.Material?.Unit ?? "—")</td>
-                            </tr>
-                        }
-                    </tbody>
-                </table>
-            }
-        </div>
-    </div>
-}
-
+<!-- ═══════════════ Подтверждение удаления ═══════════════ -->
 @if (nsiConfirm is not null)
 {
     <div class="tn-backdrop" @onclick="() => nsiConfirm = null">
@@ -583,16 +502,14 @@
     </div>
 }
 
+<!-- ═══════════════ Добавить шаг ═══════════════ -->
 @if (showAddStepModal)
 {
     <div class="tn-backdrop" @onclick="CloseModals">
         <div class="tn-modal" @onclick:stopPropagation style="max-width:560px;max-height:90vh;overflow-y:auto;">
             <div class="tn-modal-header">
                 <h5>Добавить шаг маршрута</h5>
-                <button class="btn-close" @onclick="CloseModals"></button>
             </div>
-
-            <!-- Основные поля -->
             <div class="row g-2 mb-3">
                 <div class="col-3">
                     <label class="form-label">№ шага</label>
@@ -613,8 +530,6 @@
                 <label class="form-label">Описание <span style="color:var(--tn-text-muted);font-weight:400;">(если операция не выбрана)</span></label>
                 <input class="form-control" @bind="stepForm.Description" placeholder="Название операции" />
             </div>
-
-            <!-- Нормы времени -->
             <div class="mb-3">
                 <div class="d-flex justify-content-between align-items-center mb-2">
                     <label class="form-label mb-0" style="font-weight:600;">
@@ -633,10 +548,7 @@
                     <div class="d-flex gap-2 align-items-center mb-2">
                         <select class="form-select form-select-sm" style="flex:1;" @bind="tn.ResourceId">
                             <option value="">— Общая (без ресурса) —</option>
-                            @foreach (var res in allResources)
-                            {
-                                <option value="@res.Id">@res.Name</option>
-                            }
+                            @foreach (var res in allResources) { <option value="@res.Id">@res.Name</option> }
                         </select>
                         <div class="input-group input-group-sm" style="width:140px;flex-shrink:0;">
                             <input type="number" class="form-control" step="0.1" min="0" placeholder="0.0" @bind="tn.NormValue" />
@@ -648,8 +560,6 @@
                     </div>
                 }
             </div>
-
-            <!-- Нормы материалов -->
             <div class="mb-3">
                 <div class="d-flex justify-content-between align-items-center mb-2">
                     <label class="form-label mb-0" style="font-weight:600;">
@@ -683,7 +593,6 @@
                     </div>
                 }
             </div>
-
             <div class="tn-modal-footer">
                 <button class="btn btn-secondary" @onclick="CloseModals">Отмена</button>
                 <button class="btn btn-primary" @onclick="SaveStep">
@@ -694,15 +603,14 @@
     </div>
 }
 
+<!-- ═══════════════ Редактировать шаг ═══════════════ -->
 @if (showEditStepModal)
 {
     <div class="tn-backdrop" @onclick="CloseModals">
         <div class="tn-modal" @onclick:stopPropagation style="max-width:560px;max-height:90vh;overflow-y:auto;">
             <div class="tn-modal-header">
                 <h5>Редактировать шаг</h5>
-                <button class="btn-close" @onclick="CloseModals"></button>
             </div>
-
             <div class="row g-2 mb-3">
                 <div class="col-3">
                     <label class="form-label">№ шага</label>
@@ -712,10 +620,7 @@
                     <label class="form-label">Операция</label>
                     <select class="form-select" @bind="stepForm.OperationId">
                         <option value="">— не выбрано —</option>
-                        @foreach (var op in allOperations)
-                        {
-                            <option value="@op.Id">@op.Name</option>
-                        }
+                        @foreach (var op in allOperations) { <option value="@op.Id">@op.Name</option> }
                     </select>
                 </div>
             </div>
@@ -723,7 +628,6 @@
                 <label class="form-label">Описание <span style="color:var(--tn-text-muted);font-weight:400;">(если операция не выбрана)</span></label>
                 <input class="form-control" @bind="stepForm.Description" placeholder="Название операции" />
             </div>
-
             <div class="mb-3">
                 <div class="d-flex justify-content-between align-items-center mb-2">
                     <label class="form-label mb-0" style="font-weight:600;">
@@ -742,10 +646,7 @@
                     <div class="d-flex gap-2 align-items-center mb-2">
                         <select class="form-select form-select-sm" style="flex:1;" @bind="tn.ResourceId">
                             <option value="">— Общая (без ресурса) —</option>
-                            @foreach (var res in allResources)
-                            {
-                                <option value="@res.Id">@res.Name</option>
-                            }
+                            @foreach (var res in allResources) { <option value="@res.Id">@res.Name</option> }
                         </select>
                         <div class="input-group input-group-sm" style="width:140px;flex-shrink:0;">
                             <input type="number" class="form-control" step="0.1" min="0" @bind="tn.NormValue" />
@@ -757,7 +658,6 @@
                     </div>
                 }
             </div>
-
             <div class="mb-3">
                 <div class="d-flex justify-content-between align-items-center mb-2">
                     <label class="form-label mb-0" style="font-weight:600;">
@@ -791,7 +691,6 @@
                     </div>
                 }
             </div>
-
             <div class="tn-modal-footer">
                 <button class="btn btn-secondary" @onclick="CloseModals">Отмена</button>
                 <button class="btn btn-primary" @onclick="SaveEditStep">
@@ -802,22 +701,16 @@
     </div>
 }
 
+<!-- ═══════════════ Добавить / Редактировать изделие ═══════════════ -->
 @if (showProductModal)
 {
     <div class="tn-backdrop" @onclick="CloseModals">
         <div class="tn-modal" @onclick:stopPropagation>
             <div class="tn-modal-header">
                 <h5>@(editingProduct?.Id > 0 ? "Редактировать изделие" : "Добавить изделие")</h5>
-                <button class="btn-close" @onclick="CloseModals"></button>
             </div>
-            <div class="mb-3">
-                <label class="form-label">Код</label>
-                <input class="form-control" @bind="productForm.Code" />
-            </div>
-            <div class="mb-3">
-                <label class="form-label">Наименование</label>
-                <input class="form-control" @bind="productForm.Name" />
-            </div>
+            <div class="mb-3"><label class="form-label">Код</label><input class="form-control" @bind="productForm.Code" /></div>
+            <div class="mb-3"><label class="form-label">Наименование</label><input class="form-control" @bind="productForm.Name" /></div>
             <div class="mb-3">
                 <label class="form-label">Тип</label>
                 <select class="form-select" @bind="productForm.Type">
@@ -826,10 +719,7 @@
                     <option value="material">Материал</option>
                 </select>
             </div>
-            <div class="mb-3">
-                <label class="form-label">Описание</label>
-                <textarea class="form-control" rows="2" @bind="productForm.Description"></textarea>
-            </div>
+            <div class="mb-3"><label class="form-label">Описание</label><textarea class="form-control" rows="2" @bind="productForm.Description"></textarea></div>
             <div class="tn-modal-footer">
                 <button class="btn btn-secondary" @onclick="CloseModals">Отмена</button>
                 <button class="btn btn-primary" @onclick="SaveProduct">Сохранить</button>
@@ -838,27 +728,35 @@
     </div>
 }
 
+<!-- ═══════════════ Создать маршрут вручную ═══════════════ -->
 @if (showCreateRouteModal && routeForProduct is not null)
 {
     <div class="tn-backdrop" @onclick="CloseModals">
         <div class="tn-modal" @onclick:stopPropagation style="max-width:420px;">
             <div class="tn-modal-header">
                 <h5>Создать маршрут</h5>
-                <button class="btn-close" @onclick="CloseModals"></button>
             </div>
             <p style="font-size:13px;">Создать маршрутную карту для изделия <strong>@routeForProduct.Name</strong>?</p>
-            <div class="mb-3">
+            <div class="mb-1">
                 <label class="form-label">Название маршрута</label>
-                <input class="form-control" @bind="newRouteName" />
+                <input class="form-control" @bind="newRouteName" @bind:event="oninput" @bind:after="CheckRouteName" />
             </div>
+            @if (routeNameConflict)
+            {
+                <div class="text-warning small mb-3">
+                    <i class="fa-solid fa-triangle-exclamation me-1"></i>Маршрут с таким именем уже существует
+                </div>
+            }
+            else { <div class="mb-3"></div> }
             <div class="tn-modal-footer">
                 <button class="btn btn-secondary" @onclick="CloseModals">Отмена</button>
-                <button class="btn btn-primary" @onclick="CreateRoute">Создать</button>
+                <button class="btn btn-primary" @onclick="CreateRoute" disabled="@routeNameConflict">Создать</button>
             </div>
         </div>
     </div>
 }
 
+<!-- ═══════════════ Результат Inductive Miner ═══════════════ -->
 @if (lastMinerResult is not null && showMinerConfirm)
 {
     <div class="tn-backdrop" @onclick="CancelMiner">
@@ -868,25 +766,19 @@
                     <i class="fa-solid fa-wand-magic-sparkles me-2" style="color:var(--tn-blue);"></i>
                     Inductive Miner — результат анализа событий
                 </h5>
-                <button class="btn-close" @onclick="CancelMiner"></button>
             </div>
-
             <div class="row g-2 mb-3">
                 <div class="col-3"><div class="stat-mini"><div class="stat-mini-val">@lastMinerResult.TotalCases</div><div class="stat-mini-lbl">трасс (дел)</div></div></div>
                 <div class="col-3"><div class="stat-mini"><div class="stat-mini-val">@lastMinerResult.TotalEvents</div><div class="stat-mini-lbl">событий</div></div></div>
                 <div class="col-3"><div class="stat-mini"><div class="stat-mini-val">@lastMinerResult.Activities.Count</div><div class="stat-mini-lbl">операций</div></div></div>
                 <div class="col-3"><div class="stat-mini"><div class="stat-mini-val">@lastMinerResult.OverallConfidence%</div><div class="stat-mini-lbl">ЧИ (ср.)</div></div></div>
             </div>
-
             <div style="max-height:280px;overflow-y:auto;border:1px solid var(--tn-border);border-radius:8px;margin-bottom:16px;">
                 <table class="table table-sm mb-0">
                     <thead style="position:sticky;top:0;background:#f8fafc;z-index:1;">
                         <tr>
-                            <th style="width:32px;">#</th>
-                            <th>Операция</th>
-                            <th style="width:60px;">ЧИ%</th>
-                            <th style="width:95px;">Ср. мин.</th>
-                            <th>Ресурсы</th>
+                            <th style="width:32px;">#</th><th>Операция</th>
+                            <th style="width:60px;">ЧИ%</th><th style="width:95px;">Ср. мин.</th><th>Ресурсы</th>
                         </tr>
                     </thead>
                     <tbody>
@@ -896,37 +788,39 @@
                             <tr>
                                 <td style="color:var(--tn-text-muted);">@(i + 1)</td>
                                 <td style="font-weight:500;">@act.Name</td>
-                                <td>
-                                    <span style="color:@(act.Confidence >= 80 ? "#16a34a" : act.Confidence >= 50 ? "#d97706" : "#dc2626");font-weight:600;">
-                                        @act.Confidence%
-                                    </span>
-                                </td>
-                                <td style="font-family:monospace;">
-                                    @(act.AvgDurationMin > 0 ? act.AvgDurationMin.ToString("F1") : "—")
-                                </td>
-                                <td style="font-size:11px;color:var(--tn-text-muted);">
-                                    @(act.Resources.Any() ? string.Join(", ", act.Resources.Take(2)) : "—")
-                                </td>
+                                <td><span style="color:@(act.Confidence >= 80 ? "#16a34a" : act.Confidence >= 50 ? "#d97706" : "#dc2626");font-weight:600;">@act.Confidence%</span></td>
+                                <td style="font-family:monospace;">@(act.AvgDurationMin > 0 ? act.AvgDurationMin.ToString("F1") : "—")</td>
+                                <td style="font-size:11px;color:var(--tn-text-muted);">@(act.Resources.Any() ? string.Join(", ", act.Resources.Take(2)) : "—")</td>
                             </tr>
                         }
                     </tbody>
                 </table>
             </div>
-
-            <div class="mb-3">
+            @{ var variantCount = GetVariantCount(); }
+            @if (variantCount > 1)
+            {
+                <div class="alert alert-info py-2 mb-3" style="font-size:12px;">
+                    <i class="fa-solid fa-code-branch me-1"></i>
+                    Обнаружено <strong>@variantCount</strong> параллельных варианта — будет создано по маршруту для каждого.
+                </div>
+            }
+            <div class="mb-1">
                 <label class="form-label">Название маршрута</label>
-                <input class="form-control" @bind="newRouteName" />
+                <input class="form-control" @bind="newRouteName" @bind:event="oninput" @bind:after="CheckRouteName" />
             </div>
-
+            @if (routeNameConflict)
+            {
+                <div class="text-warning small mb-3">
+                    <i class="fa-solid fa-triangle-exclamation me-1"></i>Маршрут с таким именем уже существует
+                </div>
+            }
+            else { <div class="mb-3"></div> }
             <div class="tn-modal-footer">
                 <button class="btn btn-secondary" @onclick="CancelMiner">Отмена</button>
-                <button class="btn btn-primary" @onclick="ConfirmBuildRoute" disabled="@isSavingRoute">
-                    @if (isSavingRoute)
-                    {
-                        <span class="spinner-border spinner-border-sm me-1" role="status"></span>
-                    }
+                <button class="btn btn-primary" @onclick="ConfirmBuildRoute" disabled="@(isSavingRoute || routeNameConflict)">
+                    @if (isSavingRoute) { <span class="spinner-border spinner-border-sm me-1" role="status"></span> }
                     <i class="fa-solid fa-floppy-disk me-1"></i>
-                    Создать маршрут (@lastMinerResult.Activities.Count оп.)
+                    Создать @(variantCount > 1 ? $"{variantCount} маршрута" : "маршрут") (@lastMinerResult.Activities.Count оп.)
                 </button>
             </div>
         </div>
@@ -936,67 +830,89 @@
 @code {
     [CascadingParameter] private Task<AuthenticationState> AuthStateTask { get; set; } = default!;
 
-    private static readonly (string, string, int)[] Tabs =
-    [
-        ("Маршрутные карты", "fa-solid fa-route",        0),
-        ("Изделия",          "fa-solid fa-box",           1),
-        ("Нормы времени",    "fa-solid fa-clock",         2),
-        ("Нормы материалов", "fa-solid fa-scale-balanced",3),
-    ];
+    private int currentUserId;
 
-    private int  activeTab    = 0;
-    private int  currentUserId;
+    private List<Product> allProducts     = [];
+    private Product?      selectedProduct;
+    private bool          showProductDropdown;
+    private string SelectedProductName => selectedProduct?.Name ?? "— выберите изделие —";
 
-    // Tab 0 — Routes (per product)
-    private int              routeProductId  = 0;
-    private List<TechRoute>  productRoutes   = [];
-    private int              expandedRouteId = 0;
-    private List<RouteStep>  expandedRouteSteps = [];
-    private bool             isLoadingSteps  = false;
-    private TechRoute?       currentRoute;       // used by SaveStep
-    private RouteStep?       selectedStep;
+    private int             routeProductId   = 0;
+    private List<TechRoute> productRoutes    = [];
+    private HashSet<int>    expandedRouteIds   = [];
+    private HashSet<int>    loadingRouteIds    = [];
+    private HashSet<int>    rebuildingRouteIds = [];
+    private Dictionary<int, List<RouteStep>> routeStepsCache   = [];
+    private Dictionary<int, RouteMetrics>    routeMetricsCache = [];
+    private List<RouteStep>                  mainRouteSteps    = [];
+    private TechRoute?                       currentRoute;
+    private RouteStep?                       selectedStep;
+    private int                              selectedStepRouteId;
 
-    // Tab 1 — Products
-    private List<Product>    allProducts      = [];
-    private List<Product>    filteredProducts = [];
-    private string           productSearch    = "";
-    private Product?         editingProduct;
-    private bool             showProductModal;
-    private bool             showCreateRouteModal;
-    private Product?         routeForProduct;
-    private string           newRouteName = "";
-    private ProductForm      productForm  = new();
+    private bool     showProductInfoModal;
+    private Product? infoProduct;
+    private bool     showProductModal;
+    private Product? editingProduct;
+    private ProductForm productForm = new();
 
-    // Tab 2 — Time norms
-    private List<TimeNorm>   timeNorms    = [];
-    private int              timeNormFilter;
+    private bool      showRenameRouteModal;
+    private TechRoute? renamingRoute;
+    private string     renameValue   = "";
+    private bool       renameConflict;
 
-    // Tab 3 — Mat norms
-    private List<MaterialNorm> matNorms   = [];
-    private int                matNormFilter;
+    private bool     showCreateRouteModal;
+    private Product? routeForProduct;
+    private string   newRouteName = "";
+    private bool     routeNameConflict;
 
-    // Shared
-    private List<Operation>  allOperations = [];
-    private List<Resource>   allResources  = [];
-    private List<Material>   allMaterials  = [];
-    private bool             showAddStepModal;
-    private bool             showEditStepModal;
-    private int              editingStepId;
-    private StepForm         stepForm = new();
+    private bool     showAddStepModal;
+    private bool     showEditStepModal;
+    private int      editingStepId;
+    private int      editingRouteId;
+    private StepForm stepForm = new();
 
-    // Confirm modal
+    private List<Operation> allOperations = [];
+    private List<Resource>  allResources  = [];
+    private List<Material>  allMaterials  = [];
+
     private record NsiConfirm(string Title, Func<Task> Action);
     private NsiConfirm? nsiConfirm;
 
-    // Inductive Miner state
-    private bool          isMining         = false;
-    private string?       minerError;
-    private MinerResult?  lastMinerResult;
-    private bool          showMinerConfirm = false;
-    private bool          isSavingRoute    = false;
+    private bool         isMining         = false;
+    private string?      minerError;
+    private MinerResult? lastMinerResult;
+    private bool         showMinerConfirm = false;
+    private bool         isSavingRoute    = false;
 
-    // Route metrics cache: routeId → computed metrics
-    private Dictionary<int, RouteMetrics> routeMetricsCache = [];
+    private enum DiffLevel { None, FullDiff, NormsDiff }
+
+    private DiffLevel GetStepDiff(RouteStep step)
+    {
+        if (!mainRouteSteps.Any()) return DiffLevel.None;
+        var mainStep = mainRouteSteps.FirstOrDefault(s => s.SequenceNum == step.SequenceNum);
+        if (mainStep is null) return DiffLevel.FullDiff;
+
+        bool opDiffers;
+        if (step.OperationId is not null && mainStep.OperationId is not null)
+            opDiffers = step.OperationId != mainStep.OperationId;
+        else if (step.OperationId is null && mainStep.OperationId is null)
+            opDiffers = step.Description != mainStep.Description;
+        else
+            opDiffers = true;
+
+        if (opDiffers) return DiffLevel.FullDiff;
+
+        var stepNorms = step.TimeNorms
+            .Select(t => (t.ResourceId, Math.Round(t.NormValue, 2)))
+            .OrderBy(x => x.ResourceId).ToList();
+        var mainNorms = mainStep.TimeNorms
+            .Select(t => (t.ResourceId, Math.Round(t.NormValue, 2)))
+            .OrderBy(x => x.ResourceId).ToList();
+
+        if (!stepNorms.SequenceEqual(mainNorms)) return DiffLevel.NormsDiff;
+
+        return DiffLevel.None;
+    }
 
     private class RouteMetrics
     {
@@ -1006,35 +922,15 @@
         public decimal Confidence    { get; set; }
         public List<(string Name, decimal Pct)> ResourceBreakdown { get; set; } = [];
     }
-
-    private async Task RunNsiConfirm()
-    {
-        if (nsiConfirm is null) return;
-        var action = nsiConfirm.Action;
-        nsiConfirm = null;
-        await action();
-    }
-
     private class ProductForm
     {
-        public string Code         { get; set; } = "";
-        public string Name         { get; set; } = "";
-        public string Type         { get; set; } = "product";
+        public string  Code        { get; set; } = "";
+        public string  Name        { get; set; } = "";
+        public string  Type        { get; set; } = "product";
         public string? Description { get; set; }
     }
-
-    private class StepTimeNormEntry
-    {
-        public int?    ResourceId { get; set; }
-        public decimal NormValue  { get; set; }
-    }
-
-    private class StepMatNormEntry
-    {
-        public int?    MaterialId      { get; set; }
-        public decimal ConsumptionRate { get; set; }
-    }
-
+    private class StepTimeNormEntry { public int? ResourceId { get; set; } public decimal NormValue { get; set; } }
+    private class StepMatNormEntry  { public int? MaterialId { get; set; } public decimal ConsumptionRate { get; set; } }
     private class StepForm
     {
         public int     SequenceNum  { get; set; } = 1;
@@ -1043,6 +939,7 @@
         public List<StepTimeNormEntry> TimeNorms { get; set; } = [];
         public List<StepMatNormEntry>  MatNorms  { get; set; } = [];
     }
+
 
     protected override async Task OnInitializedAsync()
     {
@@ -1055,67 +952,129 @@
         var t4 = MatSvc.GetAllAsync();
         await Task.WhenAll(t1, t2, t3, t4);
 
-        allProducts      = t1.Result;
-        allOperations    = t2.Result;
-        allResources     = t3.Result;
-        allMaterials     = t4.Result;
-        filteredProducts = [.. allProducts];
+        allProducts   = t1.Result;
+        allOperations = t2.Result;
+        allResources  = t3.Result;
+        allMaterials  = t4.Result;
+
+        if (allProducts.Any())
+        {
+            selectedProduct = allProducts[0];
+            routeProductId  = selectedProduct.Id;
+            await LoadProductRoutes();
+        }
     }
 
-    private async Task SetTab(int tab)
+
+    private void ToggleProductDropdown() => showProductDropdown = !showProductDropdown;
+    private void CloseProductDropdown()  => showProductDropdown = false;
+
+    private async Task SelectProduct(Product? p)
     {
-        activeTab = tab;
-        if (tab == 2 && !timeNorms.Any()) await LoadTimeNorms();
-        if (tab == 3 && !matNorms.Any())  await LoadMatNorms();
+        selectedProduct     = p;
+        routeProductId      = p?.Id ?? 0;
+        showProductDropdown = false;
+        await LoadProductRoutes();
     }
 
-    // ── Tab 0: Route cards ────────────────────────────────────────────────────
+    private void ShowProductInfo(Product p)
+    {
+        infoProduct          = p;
+        showProductInfoModal = true;
+        showProductDropdown  = false;
+    }
+
+    private void ShowEditFromInfo()
+    {
+        if (infoProduct is null) return;
+        showProductInfoModal = false;
+        ShowEditProductModal(infoProduct);
+    }
+
+    private void DeleteProduct(Product p)
+    {
+        showProductInfoModal = false;
+        nsiConfirm = new($"Удалить изделие «{p.Name}»?", async () =>
+        {
+            if (routeProductId == p.Id)
+            {
+                selectedProduct   = null;
+                routeProductId    = 0;
+                productRoutes     = [];
+                expandedRouteIds.Clear();
+                routeStepsCache.Clear();
+                routeMetricsCache.Clear();
+                mainRouteSteps    = [];
+            }
+            await AuditSvc.LogAsync(currentUserId, "Изделие удалено",
+                "Product", p.Id, oldValue: new { p.Name, p.Code, p.Type });
+            await ProductSvc.DeleteAsync(p.Id);
+            allProducts.RemoveAll(x => x.Id == p.Id);
+        });
+    }
+
 
     private async Task LoadProductRoutes()
     {
-        expandedRouteId    = 0;
-        expandedRouteSteps = [];
-        currentRoute       = null;
-        selectedStep       = null;
-        routeMetricsCache  = [];
-        minerError         = null;
+        expandedRouteIds.Clear();
+        loadingRouteIds.Clear();
+        routeStepsCache.Clear();
+        routeMetricsCache.Clear();
+        mainRouteSteps  = [];
+        selectedStep    = null;
+        currentRoute    = null;
+        minerError      = null;
+
         if (routeProductId == 0) { productRoutes = []; return; }
         productRoutes = await RouteSvc.GetByProductAsync(routeProductId);
+
+        var mainRoute = productRoutes.FirstOrDefault(r => r.Status == "published");
+        if (mainRoute is not null)
+        {
+            var full = await RouteSvc.GetByIdWithStepsAsync(mainRoute.Id);
+            mainRouteSteps                    = full?.Steps.OrderBy(s => s.SequenceNum).ToList() ?? [];
+            routeStepsCache[mainRoute.Id]     = mainRouteSteps;
+            routeMetricsCache[mainRoute.Id]   = ComputeMetrics(mainRouteSteps);
+        }
     }
+
 
     private async Task ToggleRoute(TechRoute route)
     {
-        if (expandedRouteId == route.Id)
+        if (expandedRouteIds.Contains(route.Id))
         {
-            expandedRouteId    = 0;
-            expandedRouteSteps = [];
-            currentRoute       = null;
-            selectedStep       = null;
+            expandedRouteIds.Remove(route.Id);
             return;
         }
-        expandedRouteId = route.Id;
-        currentRoute    = route;
-        selectedStep    = null;
-        isLoadingSteps  = true;
-        StateHasChanged();
+        expandedRouteIds.Add(route.Id);
 
-        var full = await RouteSvc.GetByIdWithStepsAsync(route.Id);
-        expandedRouteSteps = full?.Steps.OrderBy(s => s.SequenceNum).ToList() ?? [];
-        isLoadingSteps     = false;
-
-        if (!routeMetricsCache.ContainsKey(route.Id))
-            routeMetricsCache[route.Id] = ComputeMetrics(expandedRouteSteps);
+        if (!routeStepsCache.ContainsKey(route.Id))
+        {
+            loadingRouteIds.Add(route.Id);
+            StateHasChanged();
+            var full  = await RouteSvc.GetByIdWithStepsAsync(route.Id);
+            var steps = full?.Steps.OrderBy(s => s.SequenceNum).ToList() ?? [];
+            routeStepsCache[route.Id]   = steps;
+            routeMetricsCache[route.Id] = ComputeMetrics(steps);
+            loadingRouteIds.Remove(route.Id);
+        }
     }
+
 
     private async Task SetDefaultRoute(TechRoute route)
     {
         await RouteSvc.PublishAsync(route.Id, currentUserId);
+        await AuditSvc.LogAsync(currentUserId, "Маршрут опубликован как основной",
+            "TechRoute", route.Id, newValue: new { route.Name, route.ProductId });
         productRoutes = await RouteSvc.GetByProductAsync(routeProductId);
-        // Reload steps if this route is expanded
-        if (expandedRouteId == route.Id)
+
+        routeStepsCache.TryGetValue(route.Id, out var cached);
+        mainRouteSteps = cached ?? [];
+        if (!mainRouteSteps.Any())
         {
             var full = await RouteSvc.GetByIdWithStepsAsync(route.Id);
-            expandedRouteSteps = full?.Steps.OrderBy(s => s.SequenceNum).ToList() ?? [];
+            mainRouteSteps = full?.Steps.OrderBy(s => s.SequenceNum).ToList() ?? [];
+            routeStepsCache[route.Id] = mainRouteSteps;
         }
     }
 
@@ -1124,317 +1083,87 @@
         nsiConfirm = new("Удалить маршрут?", async () =>
         {
             bool wasMain = route.Status == "published";
+            await AuditSvc.LogAsync(currentUserId, "Маршрут удалён",
+                "TechRoute", route.Id, oldValue: new { route.Name, route.ProductId, route.Status });
             await RouteSvc.DeleteAsync(route.Id);
-            if (expandedRouteId == route.Id) { expandedRouteId = 0; expandedRouteSteps = []; currentRoute = null; }
+            expandedRouteIds.Remove(route.Id);
+            routeStepsCache.Remove(route.Id);
+            routeMetricsCache.Remove(route.Id);
+            if (selectedStepRouteId == route.Id) selectedStep = null;
+
             productRoutes = await RouteSvc.GetByProductAsync(routeProductId);
-            // Auto-promote the first remaining route if the main was deleted
-            if (wasMain && productRoutes.Any())
-                await RouteSvc.PublishAsync(productRoutes[0].Id, currentUserId);
-            productRoutes = await RouteSvc.GetByProductAsync(routeProductId);
-        });
-    }
 
-    private void PrepareAddStep(TechRoute route)
-    {
-        currentRoute = route;
-        stepForm = new StepForm { SequenceNum = expandedRouteSteps.Count + 1 };
-        showAddStepModal = true;
-    }
-
-    private void SelectStep(RouteStep step) =>
-        selectedStep = (selectedStep?.Id == step.Id) ? null : step;
-
-    private void PrepareEditStep(RouteStep step)
-    {
-        editingStepId = step.Id;
-        stepForm = new StepForm
-        {
-            SequenceNum = step.SequenceNum,
-            OperationId = step.OperationId,
-            Description = step.Description,
-            TimeNorms   = step.TimeNorms.Select(tn => new StepTimeNormEntry
+            if (wasMain)
             {
-                ResourceId = tn.ResourceId,
-                NormValue  = tn.NormValue,
-            }).ToList(),
-            MatNorms = step.MaterialNorms.Select(mn => new StepMatNormEntry
-            {
-                MaterialId      = mn.MaterialId,
-                ConsumptionRate = mn.ConsumptionRate,
-            }).ToList(),
-        };
-        showEditStepModal = true;
-    }
-
-    private async Task SaveEditStep()
-    {
-        var stepToEdit = expandedRouteSteps.FirstOrDefault(s => s.Id == editingStepId);
-        if (stepToEdit is null) return;
-
-        stepToEdit.SequenceNum = stepForm.SequenceNum;
-        stepToEdit.OperationId = stepForm.OperationId;
-        stepToEdit.Description = stepForm.Description;
-        await StepSvc.UpdateAsync(stepToEdit);
-
-        foreach (var tn in stepToEdit.TimeNorms.ToList())
-            await TimeNormSvc.DeleteAsync(tn.Id);
-        foreach (var tn in stepForm.TimeNorms.Where(t => t.NormValue > 0))
-            await TimeNormSvc.UpsertAsync(new TimeNorm
-            {
-                RouteStepId = editingStepId,
-                ResourceId  = tn.ResourceId,
-                NormValue   = tn.NormValue,
-                IsManual    = true,
-                UpdatedAt   = DateTime.UtcNow,
-            });
-
-        foreach (var mn in stepToEdit.MaterialNorms.ToList())
-            await MatNormSvc.DeleteAsync(mn.Id);
-        foreach (var mn in stepForm.MatNorms.Where(m => m.MaterialId.HasValue && m.ConsumptionRate > 0))
-            await MatNormSvc.UpsertAsync(new MaterialNorm
-            {
-                RouteStepId     = editingStepId,
-                MaterialId      = mn.MaterialId!.Value,
-                ConsumptionRate = mn.ConsumptionRate,
-            });
-
-        if (currentRoute is not null)
-        {
-            var full = await RouteSvc.GetByIdWithStepsAsync(currentRoute.Id);
-            expandedRouteSteps = full?.Steps.OrderBy(s => s.SequenceNum).ToList() ?? [];
-            routeMetricsCache[currentRoute.Id] = ComputeMetrics(expandedRouteSteps);
-        }
-        CloseModals();
-    }
-
-    private void DeleteStep(int stepId)
-    {
-        var deletedSeqNum = expandedRouteSteps.FirstOrDefault(s => s.Id == stepId)?.SequenceNum ?? 0;
-
-        nsiConfirm = new("Удалить шаг?", async () =>
-        {
-            await StepSvc.DeleteAsync(stepId);
-            if (selectedStep?.Id == stepId) selectedStep = null;
-            if (currentRoute is not null)
-            {
-                var full = await RouteSvc.GetByIdWithStepsAsync(currentRoute.Id);
-                expandedRouteSteps = full?.Steps.OrderBy(s => s.SequenceNum).ToList() ?? [];
-
-                // Decrement SeqNum for all later steps when the deleted group becomes empty
-                if (deletedSeqNum > 0 && !expandedRouteSteps.Any(s => s.SequenceNum == deletedSeqNum))
+                mainRouteSteps = [];
+                if (productRoutes.Any())
                 {
-                    foreach (var s in expandedRouteSteps.Where(s => s.SequenceNum > deletedSeqNum))
+                    await RouteSvc.PublishAsync(productRoutes[0].Id, currentUserId);
+                    productRoutes = await RouteSvc.GetByProductAsync(routeProductId);
+                    var newMain = productRoutes.FirstOrDefault(r => r.Status == "published");
+                    if (newMain is not null)
                     {
-                        s.SequenceNum--;
-                        await StepSvc.UpdateAsync(s);
+                        var full = await RouteSvc.GetByIdWithStepsAsync(newMain.Id);
+                        mainRouteSteps = full?.Steps.OrderBy(s => s.SequenceNum).ToList() ?? [];
+                        routeStepsCache[newMain.Id] = mainRouteSteps;
                     }
-                    full = await RouteSvc.GetByIdWithStepsAsync(currentRoute.Id);
-                    expandedRouteSteps = full?.Steps.OrderBy(s => s.SequenceNum).ToList() ?? [];
                 }
-
-                routeMetricsCache[currentRoute.Id] = ComputeMetrics(expandedRouteSteps);
             }
+
+            allProducts = await ProductSvc.GetAllWithRoutesAsync();
         });
     }
 
-    private void DeleteSelectedStep()
+    private async Task DuplicateRoute(TechRoute route)
     {
-        if (selectedStep is null) return;
-        DeleteStep(selectedStep.Id);
+        int n = 1;
+        while (productRoutes.Any(r => r.Name == $"{route.Name} Копия {n}")) n++;
+        var newName = $"{route.Name} Копия {n}";
+        var newRoute = await RouteSvc.DuplicateAsync(route.Id, newName, currentUserId);
+        await AuditSvc.LogAsync(currentUserId, "Маршрут дублирован",
+            "TechRoute", newRoute.Id, newValue: new { Name = newName, Source = route.Name, route.ProductId });
+        allProducts   = await ProductSvc.GetAllWithRoutesAsync();
+        productRoutes = await RouteSvc.GetByProductAsync(routeProductId);
     }
 
-    private async Task SaveStep()
+    private void PrepareRenameRoute(TechRoute route)
     {
-        if (currentRoute is null) return;
-        var step = new RouteStep
-        {
-            RouteId     = currentRoute.Id,
-            SequenceNum = stepForm.SequenceNum,
-            OperationId = stepForm.OperationId,
-            Description = stepForm.Description,
-        };
-        step = await StepSvc.CreateAsync(step);
-
-        // Save time norms
-        foreach (var tn in stepForm.TimeNorms.Where(t => t.NormValue > 0))
-        {
-            await TimeNormSvc.UpsertAsync(new TimeNorm
-            {
-                RouteStepId = step.Id,
-                ResourceId  = tn.ResourceId,
-                NormValue   = tn.NormValue,
-                IsManual    = true,
-                UpdatedAt   = DateTime.UtcNow,
-            });
-        }
-
-        // Save material norms
-        foreach (var mn in stepForm.MatNorms.Where(m => m.MaterialId.HasValue && m.ConsumptionRate > 0))
-        {
-            await MatNormSvc.UpsertAsync(new MaterialNorm
-            {
-                RouteStepId     = step.Id,
-                MaterialId      = mn.MaterialId!.Value,
-                ConsumptionRate = mn.ConsumptionRate,
-            });
-        }
-
-        var full = await RouteSvc.GetByIdWithStepsAsync(currentRoute.Id);
-        expandedRouteSteps = full?.Steps.OrderBy(s => s.SequenceNum).ToList() ?? [];
-        routeMetricsCache[currentRoute.Id] = ComputeMetrics(expandedRouteSteps);
-        CloseModals();
+        renamingRoute        = route;
+        renameValue          = route.Name;
+        renameConflict       = false;
+        showRenameRouteModal = true;
     }
 
-    private void AddTimeNormEntry() => stepForm.TimeNorms.Add(new StepTimeNormEntry());
-    private void AddMatNormEntry()  => stepForm.MatNorms.Add(new StepMatNormEntry());
-
-    // ── Inductive Miner / Auto-build ─────────────────────────────────────────────
-
-    private async Task AutoBuildRoute()
+    private void CheckRenameName()
     {
-        if (routeProductId == 0) return;
-        minerError = null;
-        isMining   = true;
-        StateHasChanged();
-
-        try
-        {
-            lastMinerResult = await RouteBuildSvc.MineFromEventsAsync(routeProductId);
-            if (!lastMinerResult.Success)
-            {
-                minerError      = lastMinerResult.ErrorMessage;
-                lastMinerResult = null;
-                return;
-            }
-            var product  = allProducts.FirstOrDefault(p => p.Id == routeProductId);
-            newRouteName     = $"МК — {product?.Name} (авто)";
-            showMinerConfirm = true;
-        }
-        finally
-        {
-            isMining = false;
-        }
+        renameConflict = !string.IsNullOrWhiteSpace(renameValue) &&
+            renamingRoute is not null &&
+            productRoutes
+                .Where(r => r.Id != renamingRoute.Id)
+                .Any(r => r.Name.Trim().Equals(renameValue.Trim(), StringComparison.OrdinalIgnoreCase));
     }
 
-    private async Task ConfirmBuildRoute()
+    private async Task SaveRenameRoute()
     {
-        if (lastMinerResult is null || string.IsNullOrWhiteSpace(newRouteName)) return;
-        isSavingRoute = true;
-        var confidence = lastMinerResult.OverallConfidence;
-
-        try
-        {
-            var route = await RouteBuildSvc.BuildRouteFromMinerAsync(
-                lastMinerResult, routeProductId, newRouteName.Trim(), currentUserId);
-
-            showMinerConfirm = false;
-            lastMinerResult  = null;
-
-            productRoutes = await RouteSvc.GetByProductAsync(routeProductId);
-            await ToggleRoute(route);
-
-            // Enrich cached metrics with miner confidence
-            if (routeMetricsCache.TryGetValue(route.Id, out var m))
-                m.Confidence = confidence;
-        }
-        catch (Exception ex)
-        {
-            minerError = $"Ошибка создания маршрута: {ex.Message}";
-        }
-        finally
-        {
-            isSavingRoute = false;
-        }
-    }
-
-    private void CancelMiner()
-    {
-        showMinerConfirm = false;
-        lastMinerResult  = null;
-    }
-
-    private RouteMetrics ComputeMetrics(List<RouteStep> steps, decimal confidence = 0m)
-    {
-        var allNorms  = steps.SelectMany(s => s.TimeNorms).ToList();
-        var totalTime = allNorms.Sum(tn => tn.NormValue);
-
-        var resTotals = allNorms
-            .GroupBy(tn => tn.Resource?.Name ?? "Общая")
-            .ToDictionary(g => g.Key, g => g.Sum(tn => tn.NormValue));
-
-        var breakdown = resTotals
-            .Select(kv => (kv.Key,
-                           Pct: totalTime > 0 ? Math.Round(kv.Value / totalTime * 100, 1) : 0m))
-            .OrderByDescending(x => x.Pct)
-            .ToList();
-
-        return new RouteMetrics
-        {
-            TotalAvgMin       = Math.Round(totalTime, 1),
-            StepCount         = steps.Count,
-            ResourceCount     = allNorms.Where(t => t.Resource is not null)
-                                        .Select(t => t.Resource!.Name).Distinct().Count(),
-            Confidence        = confidence,
-            ResourceBreakdown = breakdown,
-        };
+        if (renamingRoute is null || string.IsNullOrWhiteSpace(renameValue)) return;
+        var oldName = renamingRoute.Name;
+        renamingRoute.Name = renameValue.Trim();
+        await RouteSvc.UpdateAsync(renamingRoute);
+        await AuditSvc.LogAsync(currentUserId, "Маршрут переименован",
+            "TechRoute", renamingRoute.Id,
+            oldValue: new { Name = oldName },
+            newValue: new { Name = renamingRoute.Name });
+        productRoutes        = await RouteSvc.GetByProductAsync(routeProductId);
+        showRenameRouteModal = false;
     }
 
     private void ShowCreateRouteModalFromTab0()
     {
-        routeForProduct = allProducts.FirstOrDefault(p => p.Id == routeProductId);
+        routeForProduct      = allProducts.FirstOrDefault(p => p.Id == routeProductId);
         if (routeForProduct is null) return;
-        newRouteName = $"МК — {routeForProduct.Name}";
-        showCreateRouteModal = true;
-    }
-
-    // ── Tab 1: Products ───────────────────────────────────────────────────────
-
-    private void FilterProducts()
-    {
-        filteredProducts = string.IsNullOrEmpty(productSearch)
-            ? [.. allProducts]
-            : allProducts.Where(p => p.Name.Contains(productSearch, StringComparison.OrdinalIgnoreCase)
-                               || (p.Code?.Contains(productSearch, StringComparison.OrdinalIgnoreCase) ?? false)).ToList();
-    }
-
-    private void ShowAddProductModal()
-    {
-        editingProduct = null;
-        productForm    = new ProductForm();
-        showProductModal = true;
-    }
-
-    private void ShowEditProductModal(Product p)
-    {
-        editingProduct = p;
-        productForm    = new ProductForm { Code = p.Code ?? "", Name = p.Name, Type = p.Type, Description = p.Description };
-        showProductModal = true;
-    }
-
-    private async Task SaveProduct()
-    {
-        if (editingProduct?.Id > 0)
-        {
-            editingProduct.Code        = productForm.Code;
-            editingProduct.Name        = productForm.Name;
-            editingProduct.Type        = productForm.Type;
-            editingProduct.Description = productForm.Description;
-            await ProductSvc.UpdateAsync(editingProduct);
-        }
-        else
-        {
-            var p = new Product { Code = productForm.Code, Name = productForm.Name, Type = productForm.Type, Description = productForm.Description };
-            p = await ProductSvc.CreateAsync(p);
-            allProducts.Add(p);
-        }
-        FilterProducts();
-        CloseModals();
-    }
-
-    private void ShowCreateRouteModal(Product p)
-    {
-        routeForProduct = p;
-        newRouteName    = $"МК — {p.Name}";
+        newRouteName         = $"МК — {routeForProduct.Name}";
+        routeNameConflict    = false;
+        CheckRouteName();
         showCreateRouteModal = true;
     }
 
@@ -1450,24 +1179,275 @@
             CreatedBy = currentUserId,
         };
         route = await RouteSvc.CreateAsync(route);
-        if (routeProductId == routeForProduct.Id)
-            productRoutes = await RouteSvc.GetByProductAsync(routeProductId);
+        await AuditSvc.LogAsync(currentUserId, "Маршрут создан вручную",
+            "TechRoute", route.Id, newValue: new { route.Name, Product = routeForProduct.Name });
+        allProducts   = await ProductSvc.GetAllWithRoutesAsync();
+        productRoutes = await RouteSvc.GetByProductAsync(routeProductId);
         CloseModals();
     }
 
-    // ── Norms ─────────────────────────────────────────────────────────────────
-    private async Task LoadTimeNorms()
+    private void CheckRouteName()
     {
-        timeNorms = timeNormFilter == 0
-            ? await TimeNormSvc.GetAllWithDetailsAsync()
-            : await TimeNormSvc.GetByProductIdAsync(timeNormFilter);
+        routeNameConflict = !string.IsNullOrWhiteSpace(newRouteName) &&
+            productRoutes.Any(r => r.Name.Trim().Equals(newRouteName.Trim(), StringComparison.OrdinalIgnoreCase));
     }
 
-    private async Task LoadMatNorms()
+
+    private async Task AutoBuildRoute()
     {
-        matNorms = matNormFilter == 0
-            ? await MatNormSvc.GetAllWithDetailsAsync()
-            : await MatNormSvc.GetByProductIdAsync(matNormFilter);
+        if (routeProductId == 0) return;
+        minerError = null;
+        isMining   = true;
+        StateHasChanged();
+        try
+        {
+            lastMinerResult = await RouteBuildSvc.MineFromEventsAsync(routeProductId);
+            if (!lastMinerResult.Success)
+            {
+                minerError      = lastMinerResult.ErrorMessage;
+                lastMinerResult = null;
+                return;
+            }
+            var product      = allProducts.FirstOrDefault(p => p.Id == routeProductId);
+            newRouteName      = $"МК — {product?.Name} (авто)";
+            routeNameConflict = false;
+            CheckRouteName();
+            showMinerConfirm  = true;
+        }
+        finally { isMining = false; }
+    }
+
+    private async Task ConfirmBuildRoute()
+    {
+        if (lastMinerResult is null || string.IsNullOrWhiteSpace(newRouteName)) return;
+        isSavingRoute = true;
+        var confidence = lastMinerResult.OverallConfidence;
+        var eventCount = lastMinerResult.TotalEvents;
+        try
+        {
+            var routes = await RouteBuildSvc.BuildRouteFromMinerAsync(
+                lastMinerResult, routeProductId, newRouteName.Trim(), currentUserId);
+
+            foreach (var route in routes)
+                await AuditSvc.LogAsync(currentUserId, "Маршрут построен из событий (Inductive Miner)",
+                    "TechRoute", route.Id,
+                    newValue: new { route.Name, Steps = lastMinerResult?.Activities.Count, Events = eventCount, Confidence = confidence });
+
+            showMinerConfirm = false;
+            lastMinerResult  = null;
+
+            allProducts   = await ProductSvc.GetAllWithRoutesAsync();
+            productRoutes = await RouteSvc.GetByProductAsync(routeProductId);
+
+            foreach (var route in routes)
+            {
+                expandedRouteIds.Add(route.Id);
+                loadingRouteIds.Add(route.Id);
+            }
+            StateHasChanged();
+
+            foreach (var route in routes)
+            {
+                var full  = await RouteSvc.GetByIdWithStepsAsync(route.Id);
+                var steps = full?.Steps.OrderBy(s => s.SequenceNum).ToList() ?? [];
+                routeStepsCache[route.Id]   = steps;
+                var m = ComputeMetrics(steps);
+                m.Confidence = confidence;
+                routeMetricsCache[route.Id] = m;
+                loadingRouteIds.Remove(route.Id);
+            }
+        }
+        catch (Exception ex) { minerError = $"Ошибка создания маршрута: {ex.Message}"; }
+        finally { isSavingRoute = false; }
+    }
+
+    private int GetVariantCount() =>
+        lastMinerResult?.Stages.Aggregate(1, (acc, s) => acc * s.Count) ?? 1;
+
+    private void CancelMiner() { showMinerConfirm = false; lastMinerResult = null; }
+
+
+    private void PrepareAddStep(TechRoute route)
+    {
+        currentRoute = route;
+        routeStepsCache.TryGetValue(route.Id, out var steps);
+        stepForm         = new StepForm { SequenceNum = (steps?.Count ?? 0) + 1 };
+        showAddStepModal = true;
+    }
+
+    private void SelectStep(RouteStep step, int routeId)
+    {
+        if (selectedStep?.Id == step.Id) { selectedStep = null; selectedStepRouteId = 0; }
+        else                             { selectedStep = step;  selectedStepRouteId = routeId; }
+    }
+
+    private void PrepareEditStep(RouteStep step, int routeId)
+    {
+        editingStepId  = step.Id;
+        editingRouteId = routeId;
+        stepForm = new StepForm
+        {
+            SequenceNum = step.SequenceNum,
+            OperationId = step.OperationId,
+            Description = step.Description,
+            TimeNorms   = step.TimeNorms.Select(tn => new StepTimeNormEntry { ResourceId = tn.ResourceId, NormValue = tn.NormValue }).ToList(),
+            MatNorms    = step.MaterialNorms.Select(mn => new StepMatNormEntry { MaterialId = mn.MaterialId, ConsumptionRate = mn.ConsumptionRate }).ToList(),
+        };
+        showEditStepModal = true;
+    }
+
+    private async Task SaveStep()
+    {
+        if (currentRoute is null) return;
+        var step = new RouteStep
+        {
+            RouteId     = currentRoute.Id,
+            SequenceNum = stepForm.SequenceNum,
+            OperationId = stepForm.OperationId,
+            Description = stepForm.Description,
+        };
+        step = await StepSvc.CreateAsync(step);
+        foreach (var tn in stepForm.TimeNorms.Where(t => t.NormValue > 0))
+            await TimeNormSvc.UpsertAsync(new TimeNorm { RouteStepId = step.Id, ResourceId = tn.ResourceId, NormValue = tn.NormValue, IsManual = true, UpdatedAt = DateTime.UtcNow });
+        foreach (var mn in stepForm.MatNorms.Where(m => m.MaterialId.HasValue && m.ConsumptionRate > 0))
+            await MatNormSvc.UpsertAsync(new MaterialNorm { RouteStepId = step.Id, MaterialId = mn.MaterialId!.Value, ConsumptionRate = mn.ConsumptionRate });
+        await AuditSvc.LogAsync(currentUserId, "Шаг маршрута добавлен",
+            "RouteStep", step.Id,
+            newValue: new { RouteId = currentRoute.Id, RouteName = currentRoute.Name, step.SequenceNum, step.Description });
+        await RefreshRouteSteps(currentRoute.Id);
+        CloseModals();
+    }
+
+    private async Task SaveEditStep()
+    {
+        routeStepsCache.TryGetValue(editingRouteId, out var steps);
+        var stepToEdit = steps?.FirstOrDefault(s => s.Id == editingStepId);
+        if (stepToEdit is null) return;
+
+        stepToEdit.SequenceNum = stepForm.SequenceNum;
+        stepToEdit.OperationId = stepForm.OperationId;
+        stepToEdit.Description = stepForm.Description;
+        await StepSvc.UpdateAsync(stepToEdit);
+
+        foreach (var tn in stepToEdit.TimeNorms.ToList()) await TimeNormSvc.DeleteAsync(tn.Id);
+        foreach (var tn in stepForm.TimeNorms.Where(t => t.NormValue > 0))
+            await TimeNormSvc.UpsertAsync(new TimeNorm { RouteStepId = editingStepId, ResourceId = tn.ResourceId, NormValue = tn.NormValue, IsManual = true, UpdatedAt = DateTime.UtcNow });
+
+        foreach (var mn in stepToEdit.MaterialNorms.ToList()) await MatNormSvc.DeleteAsync(mn.Id);
+        foreach (var mn in stepForm.MatNorms.Where(m => m.MaterialId.HasValue && m.ConsumptionRate > 0))
+            await MatNormSvc.UpsertAsync(new MaterialNorm { RouteStepId = editingStepId, MaterialId = mn.MaterialId!.Value, ConsumptionRate = mn.ConsumptionRate });
+
+        await AuditSvc.LogAsync(currentUserId, "Шаг маршрута изменён",
+            "RouteStep", editingStepId,
+            newValue: new { stepToEdit.SequenceNum, stepToEdit.Description, RouteId = editingRouteId });
+        await RefreshRouteSteps(editingRouteId);
+        CloseModals();
+    }
+
+    private void DeleteStep(int stepId, int routeId)
+    {
+        routeStepsCache.TryGetValue(routeId, out var steps);
+        var deletedSeqNum = steps?.FirstOrDefault(s => s.Id == stepId)?.SequenceNum ?? 0;
+        nsiConfirm = new("Удалить шаг?", async () =>
+        {
+            await AuditSvc.LogAsync(currentUserId, "Шаг маршрута удалён",
+                "RouteStep", stepId, oldValue: new { RouteId = routeId, SeqNum = deletedSeqNum });
+            await StepSvc.DeleteAsync(stepId);
+            if (selectedStep?.Id == stepId) { selectedStep = null; selectedStepRouteId = 0; }
+            var full     = await RouteSvc.GetByIdWithStepsAsync(routeId);
+            var newSteps = full?.Steps.OrderBy(s => s.SequenceNum).ToList() ?? [];
+            if (deletedSeqNum > 0 && !newSteps.Any(s => s.SequenceNum == deletedSeqNum))
+            {
+                foreach (var s in newSteps.Where(s => s.SequenceNum > deletedSeqNum))
+                {
+                    s.SequenceNum--;
+                    await StepSvc.UpdateAsync(s);
+                }
+                full     = await RouteSvc.GetByIdWithStepsAsync(routeId);
+                newSteps = full?.Steps.OrderBy(s => s.SequenceNum).ToList() ?? [];
+            }
+            routeStepsCache[routeId]   = newSteps;
+            routeMetricsCache[routeId] = ComputeMetrics(newSteps);
+            var mainRoute = productRoutes.FirstOrDefault(r => r.Status == "published");
+            if (mainRoute?.Id == routeId) mainRouteSteps = newSteps;
+        });
+    }
+
+    private void DeleteSelectedStep()
+    {
+        if (selectedStep is null) return;
+        DeleteStep(selectedStep.Id, selectedStepRouteId);
+    }
+
+    private async Task RefreshRouteSteps(int routeId)
+    {
+        var full  = await RouteSvc.GetByIdWithStepsAsync(routeId);
+        var steps = full?.Steps.OrderBy(s => s.SequenceNum).ToList() ?? [];
+        routeStepsCache[routeId]   = steps;
+        routeMetricsCache[routeId] = ComputeMetrics(steps);
+        var mainRoute = productRoutes.FirstOrDefault(r => r.Status == "published");
+        if (mainRoute?.Id == routeId) mainRouteSteps = steps;
+    }
+
+
+    private void ShowAddProductModal()
+    {
+        editingProduct   = null;
+        productForm      = new ProductForm();
+        showProductModal = true;
+    }
+
+    private void ShowEditProductModal(Product p)
+    {
+        editingProduct   = p;
+        productForm      = new ProductForm { Code = p.Code ?? "", Name = p.Name, Type = p.Type, Description = p.Description };
+        showProductModal = true;
+    }
+
+    private async Task SaveProduct()
+    {
+        if (editingProduct?.Id > 0)
+        {
+            var oldName = editingProduct.Name;
+            editingProduct.Code        = productForm.Code;
+            editingProduct.Name        = productForm.Name;
+            editingProduct.Type        = productForm.Type;
+            editingProduct.Description = productForm.Description;
+            await ProductSvc.UpdateAsync(editingProduct);
+            await AuditSvc.LogAsync(currentUserId, "Изделие изменено",
+                "Product", editingProduct.Id,
+                oldValue: new { Name = oldName },
+                newValue: new { editingProduct.Name, editingProduct.Code, editingProduct.Type });
+        }
+        else
+        {
+            var p = await ProductSvc.CreateAsync(new Product
+            {
+                Code        = productForm.Code,
+                Name        = productForm.Name,
+                Type        = productForm.Type,
+                Description = productForm.Description,
+            });
+            await AuditSvc.LogAsync(currentUserId, "Изделие создано",
+                "Product", p.Id,
+                newValue: new { p.Name, p.Code, p.Type });
+        }
+        allProducts     = await ProductSvc.GetAllWithRoutesAsync();
+        if (selectedProduct is not null)
+            selectedProduct = allProducts.FirstOrDefault(p => p.Id == selectedProduct.Id);
+        CloseModals();
+    }
+
+
+    private void AddTimeNormEntry() => stepForm.TimeNorms.Add(new StepTimeNormEntry());
+    private void AddMatNormEntry()  => stepForm.MatNorms.Add(new StepMatNormEntry());
+
+    private async Task RunNsiConfirm()
+    {
+        if (nsiConfirm is null) return;
+        var action = nsiConfirm.Action;
+        nsiConfirm = null;
+        await action();
     }
 
     private void CloseModals()
@@ -1477,18 +1457,128 @@
         showProductModal     = false;
         showCreateRouteModal = false;
         editingStepId        = 0;
+        editingRouteId       = 0;
     }
 
-    // ── Helpers ───────────────────────────────────────────────────────────────
-    private static string TruncText(string s, int max) =>
-        s.Length <= max ? s : s[..max] + "…";
-
-    private static string StatusBadge(string s) => s switch
+    private RouteMetrics ComputeMetrics(List<RouteStep> steps, decimal confidence = 0m)
     {
-        "published" => "badge-published",
-        "archived"  => "badge-archived",
-        _           => "badge-draft",
-    };
+        var allNorms  = steps.SelectMany(s => s.TimeNorms).ToList();
+        var totalTime = allNorms.Sum(tn => tn.NormValue);
+        var resTotals = allNorms.GroupBy(tn => tn.Resource?.Name ?? "Общая")
+                                .ToDictionary(g => g.Key, g => g.Sum(tn => tn.NormValue));
+        var breakdown = resTotals
+            .Select(kv => (kv.Key, Pct: totalTime > 0 ? Math.Round(kv.Value / totalTime * 100, 1) : 0m))
+            .OrderByDescending(x => x.Pct).ToList();
+        return new RouteMetrics
+        {
+            TotalAvgMin       = Math.Round(totalTime, 1),
+            StepCount         = steps.Count,
+            ResourceCount     = allNorms.Where(t => t.Resource is not null).Select(t => t.Resource!.Name).Distinct().Count(),
+            Confidence        = confidence,
+            ResourceBreakdown = breakdown,
+        };
+    }
+
+    private RenderFragment StepCardInner(RouteStep step, string sName, decimal tot, bool sel, int routeId, DiffLevel diff) =>
+        @<text>
+            <div class="mk-step-num">Операция @step.SequenceNum</div>
+            <div class="mk-step-name" title="@sName">@TruncText(sName, 24)</div>
+            @if (step.Operation?.Code is not null)
+            {
+                <div class="mk-step-code">@step.Operation.Code</div>
+            }
+            @if (step.TimeNorms.Any())
+            {
+                <div class="mk-step-divider"></div>
+                <div class="mk-step-norms-section @(diff == DiffLevel.NormsDiff ? "has-diff" : "")">
+                    @foreach (var tn in step.TimeNorms.OrderByDescending(t => t.NormValue))
+                    {
+                        var resPct = tot > 0 ? (int)Math.Round(tn.NormValue / tot * 100) : 0;
+                        <div class="mk-step-resource">
+                            <i class="fa-solid fa-gear" style="flex-shrink:0;font-size:10px;"></i>
+                            <span class="mk-res-name">@(tn.Resource?.Name ?? "Общая")</span>
+                            @if (step.TimeNorms.Count > 1) { <span class="mk-res-pct">@resPct%</span> }
+                        </div>
+                        <div class="mk-step-time">
+                            <i class="fa-regular fa-clock" style="flex-shrink:0;font-size:10px;"></i>
+                            @tn.NormValue мин / 1 ед.
+                        </div>
+                    }
+                </div>
+            }
+            else { <div class="mk-step-no-norm">Нормы не заданы</div> }
+            @if (step.MaterialNorms.Any())
+            {
+                <div class="mk-step-divider"></div>
+                <div class="mk-step-norms-section">
+                    @foreach (var mn in step.MaterialNorms.OrderByDescending(m => m.ConsumptionRate))
+                    {
+                        <div class="mk-step-resource">
+                            <i class="fa-solid fa-cubes" style="flex-shrink:0;font-size:10px;color:#94a3b8;"></i>
+                            <span class="mk-res-name">@(mn.Material?.Name ?? "—")</span>
+                        </div>
+                        <div class="mk-step-time">
+                            <i class="fa-solid fa-scale-balanced" style="flex-shrink:0;font-size:10px;color:#94a3b8;"></i>
+                            @mn.ConsumptionRate @(mn.Material?.Unit ?? "ед.")
+                        </div>
+                    }
+                </div>
+            }
+            @if (sel)
+            {
+                <div @onclick:stopPropagation style="margin-top:8px;display:flex;flex-direction:column;gap:4px;">
+                    <AuthorizeView Roles="technologist">
+                        <Authorized>
+                            <button class="btn btn-sm btn-outline-primary py-0 px-2 w-100"
+                                    @onclick="() => PrepareEditStep(step, routeId)">
+                                <i class="fa-solid fa-pen me-1"></i>Редактировать
+                            </button>
+                            <button class="btn btn-sm btn-outline-danger py-0 px-2 w-100"
+                                    @onclick="DeleteSelectedStep">
+                                <i class="fa-solid fa-trash-can me-1"></i>Удалить
+                            </button>
+                        </Authorized>
+                    </AuthorizeView>
+                </div>
+            }
+        </text>;
+
+    private async Task ToggleAutoUpdate(TechRoute route, bool value)
+    {
+        route.IsAutoUpdate = value;
+        await RouteSvc.UpdateAsync(route);
+        var pr = productRoutes.FirstOrDefault(r => r.Id == route.Id);
+        if (pr is not null) pr.IsAutoUpdate = value;
+    }
+
+    private async Task RebuildRoute(TechRoute route)
+    {
+        if (!route.SourceEventCount.HasValue) return;
+        rebuildingRouteIds.Add(route.Id);
+        expandedRouteIds.Add(route.Id);
+        StateHasChanged();
+        try
+        {
+            await RouteBuildSvc.ManualRebuildAsync(route.Id, currentUserId);
+            await AuditSvc.LogAsync(currentUserId, "Маршрут перестроен из событий",
+                "TechRoute", route.Id, newValue: new { route.Name });
+            var full  = await RouteSvc.GetByIdWithStepsAsync(route.Id);
+            var steps = full?.Steps.OrderBy(s => s.SequenceNum).ToList() ?? [];
+            routeStepsCache[route.Id]   = steps;
+            routeMetricsCache[route.Id] = ComputeMetrics(steps);
+            if (full is not null)
+            {
+                route.UpdatedAt        = full.UpdatedAt;
+                route.SourceEventCount = full.SourceEventCount;
+            }
+        }
+        finally
+        {
+            rebuildingRouteIds.Remove(route.Id);
+        }
+    }
+
+    private static string TruncText(string s, int max) => s.Length <= max ? s : s[..max] + "…";
 
     private static string StatusLabel(string s) => s switch
     {
@@ -1500,7 +1590,7 @@
     private static string ProductTypeLabel(string t) => t switch
     {
         "product"       => "Изделие",
-        "semi_finished" => "П/Ф",
+        "semi_finished" => "Полуфабрикат",
         "material"      => "Материал",
         _               => t,
     };

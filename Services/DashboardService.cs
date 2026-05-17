@@ -100,9 +100,9 @@ public class DashboardService(IDbContextFactory<TechNormDbContext> factory) : ID
     {
         using var db = await factory.CreateDbContextAsync();
         var start = DateTime.UtcNow.Date.AddDays(-364);
-        var rows = await db.EventLogs
-            .Where(e => e.CreatedBy == userId && e.Timestamp >= start)
-            .GroupBy(e => e.Timestamp.Date)
+        var rows = await db.AuditLogs
+            .Where(a => a.UserId == userId && a.CreatedAt >= start)
+            .GroupBy(a => a.CreatedAt.Date)
             .Select(g => new { Date = g.Key, Count = g.Count() })
             .ToListAsync();
         return rows.ToDictionary(x => DateOnly.FromDateTime(x.Date), x => x.Count);

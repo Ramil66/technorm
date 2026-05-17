@@ -2,6 +2,8 @@
 @attribute [Authorize(Roles = "admin")]
 @rendermode InteractiveServer
 @inject IUserService UserSvc
+@inject IAuditLogService AuditSvc
+@using Microsoft.AspNetCore.Components.Authorization
 
 <PageTitle>Пользователи — ТехНорм</PageTitle>
 
@@ -102,7 +104,6 @@
         <div class="tn-modal" @onclick:stopPropagation>
             <div class="tn-modal-header">
                 <h5>@(editingUser is null ? "Добавить пользователя" : "Редактировать пользователя")</h5>
-                <button class="btn-close" @onclick="CloseModal"></button>
             </div>
 
             @if (editingUser is null)
@@ -192,6 +193,9 @@
 }
 
 @code {
+    [CascadingParameter] private Task<AuthenticationState> AuthStateTask { get; set; } = default!;
+
+    private int     currentUserId;
     private List<User>  allUsers      = [];
     private List<User>  filteredUsers = [];
     private string searchQuery = "";
@@ -215,6 +219,8 @@
 
     protected override async Task OnInitializedAsync()
     {
+        var auth = await AuthStateTask;
+        currentUserId = int.Parse(auth.User.FindFirst("UserId")?.Value ?? "0");
         allUsers = await UserSvc.GetAllAsync();
         FilterUsers();
     }
@@ -265,18 +271,27 @@
             };
             user = await UserSvc.CreateAsync(user, form.Password);
             allUsers.Add(user);
+            await AuditSvc.LogAsync(currentUserId, "Пользователь создан",
+                "User", user.Id, newValue: new { user.Username, user.FullName, user.Role });
         }
         else
         {
+            var oldRole = editingUser.Role;
             editingUser.FullName = form.FullName.Trim();
             editingUser.Email    = form.Email?.Trim();
             editingUser.Role     = form.Role;
             await UserSvc.UpdateAsync(editingUser);
+            await AuditSvc.LogAsync(currentUserId, "Пользователь отредактирован",
+                "User", editingUser.Id,
+                oldValue: new { editingUser.FullName, Role = oldRole },
+                newValue: new { editingUser.FullName, editingUser.Role });
 
             if (!string.IsNullOrEmpty(form.Password))
             {
                 if (form.Password.Length < 6) { modalError = "Пароль минимум 6 символов."; return; }
                 await UserSvc.ChangePasswordAsync(editingUser.Id, form.Password);
+                await AuditSvc.LogAsync(currentUserId, "Пароль пользователя изменён",
+                    "User", editingUser.Id, newValue: new { editingUser.Username });
             }
         }
 
@@ -284,7 +299,6 @@
         CloseModal();
     }
 
-    // ── Toggle active ─────────────────────────────────────────────────────────
     private void AskToggleActive(User u) => toggleConfirmUser = u;
     private void CancelToggle()          => toggleConfirmUser = null;
 
@@ -293,11 +307,14 @@
         if (toggleConfirmUser is null) return;
         var u = toggleConfirmUser;
         toggleConfirmUser = null;
-        await UserSvc.SetActiveAsync(u.Id, !u.IsActive);
-        u.IsActive = !u.IsActive;
+        var newState = !u.IsActive;
+        await UserSvc.SetActiveAsync(u.Id, newState);
+        u.IsActive = newState;
+        await AuditSvc.LogAsync(currentUserId,
+            newState ? "Пользователь разблокирован" : "Пользователь заблокирован",
+            "User", u.Id, newValue: new { u.Username, u.FullName, IsActive = newState });
     }
 
-    // ── Delete ────────────────────────────────────────────────────────────────
     private void AskDeleteUser(User u) => deleteConfirmUser = u;
     private void CancelDelete()        => deleteConfirmUser = null;
 
@@ -306,6 +323,8 @@
         if (deleteConfirmUser is null) return;
         var u = deleteConfirmUser;
         deleteConfirmUser = null;
+        await AuditSvc.LogAsync(currentUserId, "Пользователь удалён",
+            "User", u.Id, oldValue: new { u.Username, u.FullName, u.Role });
         await UserSvc.DeleteAsync(u.Id);
         allUsers.Remove(u);
         FilterUsers();

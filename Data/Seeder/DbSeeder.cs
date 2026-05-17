@@ -16,7 +16,6 @@ public static class DbSeeder
 
         logger.LogInformation("Seed: добавление тестовых данных...");
 
-        // ── Операции ───────────────────────────────────────────────────────────
         var ops = new[]
         {
             new Operation { Code = "ОП-001", Name = "Токарная обработка",     Description = "Обработка на токарных станках с ЧПУ" },
@@ -29,7 +28,6 @@ public static class DbSeeder
         };
         db.Operations.AddRange(ops);
 
-        // ── Ресурсы ────────────────────────────────────────────────────────────
         var res = new[]
         {
             new Resource { Code = "ОБ-001", Name = "Токарный станок CNC-200",   Type = "equipment",   IsActive = true },
@@ -43,7 +41,6 @@ public static class DbSeeder
         };
         db.Resources.AddRange(res);
 
-        // ── Материалы ──────────────────────────────────────────────────────────
         var mats = new[]
         {
             new Material { Code = "МТ-001", Name = "Сталь 45 ГОСТ 1050-2013",    Unit = "кг",  Description = "Конструкционная углеродистая сталь" },
@@ -54,7 +51,6 @@ public static class DbSeeder
         };
         db.Materials.AddRange(mats);
 
-        // ── Изделия ────────────────────────────────────────────────────────────
         var products = new[]
         {
             new Product { Code = "ИЗД-001", Name = "Вал редуктора Р-120",      Type = "product",       Description = "Вал выходной одноступенчатого редуктора, сталь 45" },
@@ -65,8 +61,6 @@ public static class DbSeeder
 
         await db.SaveChangesAsync();
 
-        // ── Маршрутные карты ───────────────────────────────────────────────────
-        // Маршрут 1: Вал редуктора
         var route1 = new TechRoute
         {
             ProductId = products[0].Id,
@@ -77,7 +71,6 @@ public static class DbSeeder
             UpdatedAt = DateTime.UtcNow.AddDays(-5),
             PublishedAt = DateTime.UtcNow.AddDays(-20),
         };
-        // Маршрут 2: Шестерня
         var route2 = new TechRoute
         {
             ProductId = products[1].Id,
@@ -88,7 +81,6 @@ public static class DbSeeder
             UpdatedAt = DateTime.UtcNow.AddDays(-3),
             PublishedAt = DateTime.UtcNow.AddDays(-18),
         };
-        // Маршрут 3: Корпус (черновик)
         var route3 = new TechRoute
         {
             ProductId = products[2].Id,
@@ -101,7 +93,6 @@ public static class DbSeeder
         db.TechRoutes.AddRange(route1, route2, route3);
         await db.SaveChangesAsync();
 
-        // ── Шаги маршрута 1 ────────────────────────────────────────────────────
         var steps1 = new[]
         {
             new RouteStep { RouteId = route1.Id, SequenceNum = 1, OperationId = ops[0].Id, Description = "Обточка наружных поверхностей вала" },
@@ -110,7 +101,6 @@ public static class DbSeeder
             new RouteStep { RouteId = route1.Id, SequenceNum = 4, OperationId = ops[2].Id, Description = "Шлифовка шеек до Ra 0.8" },
             new RouteStep { RouteId = route1.Id, SequenceNum = 5, OperationId = ops[4].Id, Description = "Контроль ОТК: биение, шероховатость" },
         };
-        // ── Шаги маршрута 2 ────────────────────────────────────────────────────
         var steps2 = new[]
         {
             new RouteStep { RouteId = route2.Id, SequenceNum = 1, OperationId = ops[0].Id, Description = "Обточка заготовки шестерни" },
@@ -122,7 +112,6 @@ public static class DbSeeder
         db.RouteSteps.AddRange(steps2);
         await db.SaveChangesAsync();
 
-        // ── Нормы времени ──────────────────────────────────────────────────────
         var timeNorms = new[]
         {
             new TimeNorm { RouteStepId = steps1[0].Id, ResourceId = res[0].Id, NormValue = 45.5m,  IsManual = false, UpdatedAt = DateTime.UtcNow },
@@ -137,7 +126,6 @@ public static class DbSeeder
         };
         db.TimeNorms.AddRange(timeNorms);
 
-        // ── Нормы материалов ───────────────────────────────────────────────────
         var matNorms = new[]
         {
             new MaterialNorm { RouteStepId = steps1[0].Id, MaterialId = mats[0].Id, ConsumptionRate = 2.4m,   UpdatedAt = DateTime.UtcNow },
@@ -148,13 +136,11 @@ public static class DbSeeder
         };
         db.MaterialNorms.AddRange(matNorms);
 
-        // ── Журнал событий ─────────────────────────────────────────────────────
         var baseDate = DateTime.UtcNow.AddDays(-14);
         var events = new List<EventLog>();
 
         var eventData = new[]
         {
-            // (caseId, activity, productIdx, resourceIdx, durationMin, shift, qty)
             ("CASE-2026-001", "Токарная обработка", 0, 0, 44.0, 1, 3),
             ("CASE-2026-001", "Сверление",          0, 3, 11.5, 1, 3),
             ("CASE-2026-001", "Термическая обработка", 0, 4, 26.0, 1, 3),
@@ -201,7 +187,6 @@ public static class DbSeeder
         }
         db.EventLogs.AddRange(events);
 
-        // ── История расчётов ───────────────────────────────────────────────────
         var calcMetrics1 = JsonDocument.Parse(JsonSerializer.Serialize(new
         {
             TotalTimeMin   = 130.0,

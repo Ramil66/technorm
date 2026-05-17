@@ -67,7 +67,6 @@ public static class TestPdfGenerator
                         c.ConstantColumn(40);   // Кол-во
                     });
 
-                    // Header row
                     static IContainer HeaderCell(IContainer c) =>
                         c.Background(Colors.Blue.Darken3)
                          .Padding(4)
@@ -80,7 +79,6 @@ public static class TestPdfGenerator
                             h.Cell().Element(HeaderCell).Text(label).FontColor(Colors.White).FontSize(8).Bold();
                     });
 
-                    // Data rows
                     for (int i = 0; i < Rows.Length; i++)
                     {
                         var r = Rows[i];
