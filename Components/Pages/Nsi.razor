@@ -11,6 +11,8 @@
 @inject IOperationService OpSvc
 @inject IRouteBuilderService RouteBuildSvc
 @inject IAuditLogService AuditSvc
+@inject IJSRuntime JS
+@using System.Text.Json
 
 <PageTitle>НСИ — ТехНорм</PageTitle>
 
@@ -108,6 +110,21 @@
                             </button>
                         </Authorized>
                     </AuthorizeView>
+                    @if (allProducts.Any(p => p.TechRoutes.Any(r => r.Status == "published")))
+                    {
+                        <button class="btn btn-outline-success btn-sm" @onclick="ExportPublishedNsi"
+                                title="Экспортировать опубликованные маршрутные карты всех изделий в JSON" disabled="@isExporting">
+                            @if (isExporting)
+                            {
+                                <span class="spinner-border spinner-border-sm me-1" role="status"></span>
+                            }
+                            else
+                            {
+                                <i class="fa-solid fa-file-export me-1"></i>
+                            }
+                            Экспорт
+                        </button>
+                    }
                 </div>
             </div>
         }
@@ -150,6 +167,7 @@
                 bool isLoading  = loadingRouteIds.Contains(route.Id);
                 routeStepsCache.TryGetValue(route.Id, out var routeSteps);
                 routeMetricsCache.TryGetValue(route.Id, out var metrics);
+                productMinerCache.TryGetValue(routeProductId, out var routeMiner);
 
                 <div class="mk-route-block @(isMain ? "mk-route-block-main" : "")">
 
@@ -186,6 +204,18 @@
                                 @if (metrics.Confidence > 0)
                                 {
                                     <span class="mk-metric"><i class="fa-solid fa-percent"></i>ЧИ @metrics.Confidence%</span>
+                                }
+                            }
+                            @if (routeMiner is not null && route.SourceEventCount.HasValue)
+                            {
+                                <span class="mk-metric" title="Покрытие событий">
+                                    <i class="fa-solid fa-chart-pie"></i>@routeMiner.Coverage%
+                                </span>
+                                @if (routeMiner.RareTransitionCount > 0)
+                                {
+                                    <span class="mk-metric" style="color:#d97706;" title="Редкие переходы DFG">
+                                        <i class="fa-solid fa-triangle-exclamation"></i>@routeMiner.RareTransitionCount ред.
+                                    </span>
                                 }
                             }
 
@@ -311,6 +341,52 @@
                                 </div>
                             }
 
+                            <!-- Переходы DFG из майнера -->
+                            @if (routeMiner is not null && route.SourceEventCount.HasValue && routeMiner.Transitions.Any())
+                            {
+                                <details style="border-bottom:1px solid var(--tn-border);padding:6px 16px;">
+                                    <summary style="font-size:12px;font-weight:600;cursor:pointer;color:var(--tn-text-muted);user-select:none;">
+                                        <i class="fa-solid fa-diagram-project me-1"></i>
+                                        Переходы между операциями (@routeMiner.Transitions.Count)
+                                        @if (routeMiner.RareTransitionCount > 0)
+                                        {
+                                            <span style="margin-left:6px;background:#fef3c7;color:#d97706;border-radius:4px;padding:1px 6px;font-size:11px;">
+                                                @routeMiner.RareTransitionCount редких
+                                            </span>
+                                        }
+                                    </summary>
+                                    <div style="max-height:180px;overflow-y:auto;border:1px solid var(--tn-border);border-radius:8px;margin-top:6px;">
+                                        <table class="table table-sm mb-0" style="font-size:12px;">
+                                            <thead style="position:sticky;top:0;background:#f8fafc;z-index:1;">
+                                                <tr>
+                                                    <th>Из операции</th><th>В операцию</th>
+                                                    <th style="width:55px;">Кол-во</th><th style="width:70px;">Уверен.</th>
+                                                </tr>
+                                            </thead>
+                                            <tbody>
+                                                @foreach (var trans in routeMiner.Transitions)
+                                                {
+                                                    <tr style="@(trans.IsRare ? "background:#fffbeb;" : "")">
+                                                        <td style="color:var(--tn-text-muted);">@trans.From</td>
+                                                        <td style="font-weight:500;">@trans.To</td>
+                                                        <td>@trans.Count</td>
+                                                        <td>
+                                                            <span style="color:@(trans.Confidence >= 50 ? "#16a34a" : trans.Confidence >= 10 ? "#d97706" : "#dc2626");font-weight:600;">
+                                                                @trans.Confidence%
+                                                            </span>
+                                                            @if (trans.IsRare)
+                                                            {
+                                                                <i class="fa-solid fa-triangle-exclamation ms-1" style="color:#d97706;font-size:10px;" title="Редкий переход"></i>
+                                                            }
+                                                        </td>
+                                                    </tr>
+                                                }
+                                            </tbody>
+                                        </table>
+                                    </div>
+                                </details>
+                            }
+
                             <!-- Уведомление об отличиях от основного -->
                             @if (!isMain && mainRouteSteps.Any())
                             {
@@ -419,7 +495,7 @@
                 }
                 @{
                     var infoMainRoute = infoProduct.TechRoutes
-                        .FirstOrDefault(r => r.Status == "published" && r.SourceEventCount.HasValue);
+                        .FirstOrDefault(r => r.Status == "published");
                 }
                 @if (infoMainRoute is not null)
                 {
@@ -773,6 +849,74 @@
                 <div class="col-3"><div class="stat-mini"><div class="stat-mini-val">@lastMinerResult.Activities.Count</div><div class="stat-mini-lbl">операций</div></div></div>
                 <div class="col-3"><div class="stat-mini"><div class="stat-mini-val">@lastMinerResult.OverallConfidence%</div><div class="stat-mini-lbl">ЧИ (ср.)</div></div></div>
             </div>
+
+            <!-- Метрики качества -->
+            <div class="row g-2 mb-3">
+                <div class="col-6">
+                    <div class="stat-mini">
+                        <div class="stat-mini-val" style="color:@(lastMinerResult.Coverage >= 90 ? "#16a34a" : lastMinerResult.Coverage >= 70 ? "#d97706" : "#dc2626");">
+                            @lastMinerResult.Coverage%
+                        </div>
+                        <div class="stat-mini-lbl">покрытие событий</div>
+                    </div>
+                </div>
+                <div class="col-6">
+                    <div class="stat-mini">
+                        <div class="stat-mini-val" style="color:@(lastMinerResult.RareTransitionCount == 0 ? "#16a34a" : "#d97706");">
+                            @lastMinerResult.RareTransitionCount
+                        </div>
+                        <div class="stat-mini-lbl">редких переходов</div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Таблица переходов DFG -->
+            @if (lastMinerResult.Transitions.Any())
+            {
+                <details style="margin-bottom:12px;">
+                    <summary style="font-size:12px;font-weight:600;cursor:pointer;color:var(--tn-text-muted);user-select:none;margin-bottom:6px;">
+                        <i class="fa-solid fa-diagram-project me-1"></i>
+                        Переходы между операциями (@lastMinerResult.Transitions.Count)
+                        @if (lastMinerResult.RareTransitionCount > 0)
+                        {
+                            <span style="margin-left:6px;background:#fef3c7;color:#d97706;border-radius:4px;padding:1px 6px;font-size:11px;">
+                                @lastMinerResult.RareTransitionCount редких
+                            </span>
+                        }
+                    </summary>
+                    <div style="max-height:180px;overflow-y:auto;border:1px solid var(--tn-border);border-radius:8px;">
+                        <table class="table table-sm mb-0" style="font-size:12px;">
+                            <thead style="position:sticky;top:0;background:#f8fafc;z-index:1;">
+                                <tr>
+                                    <th>Из операции</th>
+                                    <th>В операцию</th>
+                                    <th style="width:55px;">Кол-во</th>
+                                    <th style="width:70px;">Уверен.</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                @foreach (var t in lastMinerResult.Transitions)
+                                {
+                                    <tr style="@(t.IsRare ? "background:#fffbeb;" : "")">
+                                        <td style="color:var(--tn-text-muted);">@t.From</td>
+                                        <td style="font-weight:500;">@t.To</td>
+                                        <td>@t.Count</td>
+                                        <td>
+                                            <span style="color:@(t.Confidence >= 50 ? "#16a34a" : t.Confidence >= 10 ? "#d97706" : "#dc2626");font-weight:600;">
+                                                @t.Confidence%
+                                            </span>
+                                            @if (t.IsRare)
+                                            {
+                                                <i class="fa-solid fa-triangle-exclamation ms-1" style="color:#d97706;font-size:10px;" title="Редкий переход"></i>
+                                            }
+                                        </td>
+                                    </tr>
+                                }
+                            </tbody>
+                        </table>
+                    </div>
+                </details>
+            }
             <div style="max-height:280px;overflow-y:auto;border:1px solid var(--tn-border);border-radius:8px;margin-bottom:16px;">
                 <table class="table table-sm mb-0">
                     <thead style="position:sticky;top:0;background:#f8fafc;z-index:1;">
@@ -883,6 +1027,9 @@
     private MinerResult? lastMinerResult;
     private bool         showMinerConfirm = false;
     private bool         isSavingRoute    = false;
+    private bool         isExporting      = false;
+
+    private Dictionary<int, MinerResult> productMinerCache = [];
 
     private enum DiffLevel { None, FullDiff, NormsDiff }
 
@@ -1027,6 +1174,14 @@
 
         if (routeProductId == 0) { productRoutes = []; return; }
         productRoutes = await RouteSvc.GetByProductAsync(routeProductId);
+
+        // Загружаем метрики майнера если ещё не кэшированы и есть маршруты из событий
+        if (!productMinerCache.ContainsKey(routeProductId) &&
+            productRoutes.Any(r => r.SourceEventCount.HasValue))
+        {
+            var mr = await RouteBuildSvc.MineFromEventsAsync(routeProductId);
+            if (mr.Success) productMinerCache[routeProductId] = mr;
+        }
 
         var mainRoute = productRoutes.FirstOrDefault(r => r.Status == "published");
         if (mainRoute is not null)
@@ -1233,6 +1388,7 @@
                     "TechRoute", route.Id,
                     newValue: new { route.Name, Steps = lastMinerResult?.Activities.Count, Events = eventCount, Confidence = confidence });
 
+            productMinerCache[routeProductId] = lastMinerResult!;
             showMinerConfirm = false;
             lastMinerResult  = null;
 
@@ -1571,10 +1727,104 @@
                 route.UpdatedAt        = full.UpdatedAt;
                 route.SourceEventCount = full.SourceEventCount;
             }
+            var freshMr = await RouteBuildSvc.MineFromEventsAsync(routeProductId);
+            if (freshMr.Success) productMinerCache[routeProductId] = freshMr;
         }
         finally
         {
             rebuildingRouteIds.Remove(route.Id);
+        }
+    }
+
+    private async Task ExportPublishedNsi()
+    {
+        isExporting = true;
+        StateHasChanged();
+        try
+        {
+            var entries = new List<object>();
+
+            foreach (var product in allProducts)
+            {
+                var routes = product.Id == routeProductId
+                    ? productRoutes
+                    : await RouteSvc.GetByProductAsync(product.Id);
+
+                var published = routes.FirstOrDefault(r => r.Status == "published");
+                if (published is null) continue;
+
+                routeStepsCache.TryGetValue(published.Id, out var cachedSteps);
+                List<RouteStep> steps;
+                if (cachedSteps is not null)
+                {
+                    steps = cachedSteps;
+                }
+                else
+                {
+                    var full = await RouteSvc.GetByIdWithStepsAsync(published.Id);
+                    steps = full?.Steps.OrderBy(s => s.SequenceNum).ToList() ?? [];
+                }
+
+                entries.Add(new
+                {
+                    product = new
+                    {
+                        id   = product.Id,
+                        code = product.Code,
+                        name = product.Name,
+                        type = ProductTypeLabel(product.Type),
+                    },
+                    route = new
+                    {
+                        id        = published.Id,
+                        name      = published.Name,
+                        version   = published.Version,
+                        status    = StatusLabel(published.Status),
+                        createdAt = published.CreatedAt.ToString("yyyy-MM-ddTHH:mm:ssZ"),
+                        updatedAt = published.UpdatedAt.ToString("yyyy-MM-ddTHH:mm:ssZ"),
+                    },
+                    steps = steps.OrderBy(s => s.SequenceNum).Select(s => new
+                    {
+                        sequenceNum = s.SequenceNum,
+                        operation   = s.Operation is not null
+                            ? (object)new { name = s.Operation.Name, code = s.Operation.Code }
+                            : null,
+                        description = s.Description,
+                        timeNorms = s.TimeNorms.OrderByDescending(t => t.NormValue).Select(t => new
+                        {
+                            resource  = t.Resource?.Name ?? "Общая",
+                            normValue = t.NormValue,
+                            unit      = "мин",
+                        }).ToList(),
+                        materialNorms = s.MaterialNorms.OrderByDescending(m => m.ConsumptionRate).Select(m => new
+                        {
+                            material        = m.Material?.Name ?? "—",
+                            unit            = m.Material?.Unit ?? "ед.",
+                            consumptionRate = m.ConsumptionRate,
+                        }).ToList(),
+                    }).ToList(),
+                });
+            }
+
+            var exportObj = new
+            {
+                exportedAt   = DateTime.UtcNow.ToString("yyyy-MM-ddTHH:mm:ssZ"),
+                totalRoutes  = entries.Count,
+                routeCards   = entries,
+            };
+
+            var json = JsonSerializer.Serialize(exportObj, new JsonSerializerOptions { WriteIndented = true });
+            var filename = $"nsi_export_{DateTime.UtcNow:yyyyMMdd_HHmm}.json";
+
+            await AuditSvc.LogAsync(currentUserId, "Экспорт всех опубликованных НСИ в JSON",
+                "System", 0,
+                newValue: new { TotalRoutes = entries.Count, ExportedAt = DateTime.UtcNow });
+
+            await JS.InvokeVoidAsync("tnInterop.downloadJson", filename, json);
+        }
+        finally
+        {
+            isExporting = false;
         }
     }
 

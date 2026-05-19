@@ -4,6 +4,7 @@
 @inject IOperationService OpSvc
 @inject IResourceService ResSvc
 @inject IMaterialService MatSvc
+@inject IOperationMatcherService MatcherSvc
 @inject IJSRuntime JS
 @inject IAuditLogService AuditSvc
 @using Microsoft.AspNetCore.Components.Authorization
@@ -12,9 +13,12 @@
 
 <div class="page-header">
     <h1><i class="fa-solid fa-book" style="color:var(--tn-blue);margin-right:10px;font-size:18px;"></i>Справочники</h1>
-    <button class="btn btn-primary btn-sm" @onclick="ShowAddModal">
-        <i class="fa-solid fa-plus me-1"></i>Добавить
-    </button>
+    @if (activeTab != 3)
+    {
+        <button class="btn btn-primary btn-sm" @onclick="ShowAddModal">
+            <i class="fa-solid fa-plus me-1"></i>Добавить
+        </button>
+    }
 </div>
 
 <div class="tn-tabs">
@@ -26,6 +30,9 @@
     </button>
     <button class="tn-tab @(activeTab == 2 ? "active" : "")" @onclick="() => SetTab(2)">
         <i class="fa-solid fa-cubes me-1"></i>Материалы
+    </button>
+    <button class="tn-tab @(activeTab == 3 ? "active" : "")" @onclick="() => SetTab(3)">
+        <i class="fa-solid fa-shuffle me-1"></i>Сопоставление операций
     </button>
 </div>
 
@@ -177,6 +184,178 @@
     </div>
 }
 
+<!-- === Сопоставление операций === -->
+@if (activeTab == 3)
+{
+    <!-- Панель теста -->
+    <div class="card mb-3">
+        <div class="card-body">
+            <div style="font-size:13px;font-weight:600;margin-bottom:10px;">
+                <i class="fa-solid fa-magnifying-glass me-1" style="color:var(--tn-blue);"></i>
+                Проверить сопоставление
+            </div>
+            <div class="d-flex gap-2 align-items-start flex-wrap">
+                <input class="form-control form-control-sm" style="max-width:320px;"
+                       @bind="testRawName" placeholder="Введите название операции…" />
+                <button class="btn btn-sm btn-outline-primary" @onclick="TestMatch" disabled="@isTesting">
+                    @if (isTesting) { <span class="spinner-border spinner-border-sm me-1"></span> }
+                    else { <i class="fa-solid fa-play me-1"></i> }
+                    Проверить
+                </button>
+                @if (testResult is not null)
+                {
+                    <button class="btn btn-sm btn-outline-secondary" @onclick="ClearTest">
+                        <i class="fa-solid fa-xmark"></i>
+                    </button>
+                }
+            </div>
+
+            @if (testResult is not null)
+            {
+                <div class="mt-3 p-3" style="background:#f8fafc;border:1px solid var(--tn-border);border-radius:8px;">
+                    <div class="row g-2">
+                        <div class="col-auto">
+                            <span style="font-size:11px;color:var(--tn-text-muted);">СТАТУС</span><br/>
+                            @switch (testResult.Status)
+                            {
+                                case MatchStatus.AutoMatched:
+                                    <span class="badge bg-success">Авто-сопоставлено</span>
+                                    break;
+                                case MatchStatus.NeedsConfirm:
+                                    <span class="badge bg-warning text-dark">Требует подтверждения</span>
+                                    break;
+                                default:
+                                    <span class="badge bg-danger">Не сопоставлено</span>
+                                    break;
+                            }
+                        </div>
+                        <div class="col-auto">
+                            <span style="font-size:11px;color:var(--tn-text-muted);">НОРМАЛИЗОВАНО</span><br/>
+                            <code style="font-size:12px;">@testResult.NormalizedInput</code>
+                        </div>
+                        @if (testResult.Operation is not null)
+                        {
+                            <div class="col-auto">
+                                <span style="font-size:11px;color:var(--tn-text-muted);">НАЙДЕНА ОПЕРАЦИЯ</span><br/>
+                                <strong style="font-size:13px;">@testResult.Operation.Name</strong>
+                                @if (testResult.Operation.Code is not null)
+                                {
+                                    <span style="font-family:monospace;font-size:11px;color:var(--tn-text-muted);margin-left:6px;">@testResult.Operation.Code</span>
+                                }
+                            </div>
+                            <div class="col-auto">
+                                <span style="font-size:11px;color:var(--tn-text-muted);">УВЕРЕННОСТЬ</span><br/>
+                                <strong style="color:@(testResult.Confidence >= 0.85m ? "#16a34a" : testResult.Confidence >= 0.60m ? "#d97706" : "#dc2626");">
+                                    @((testResult.Confidence * 100).ToString("F1"))%
+                                </strong>
+                            </div>
+                            @if (testResult.WasCached)
+                            {
+                                <div class="col-auto align-self-end">
+                                    <span class="badge bg-info text-dark" style="font-size:11px;">из кэша</span>
+                                </div>
+                            }
+                        }
+                    </div>
+                    @if (testResult.Status == MatchStatus.NeedsConfirm && testResult.Operation is not null && !testResult.WasCached)
+                    {
+                        <div class="mt-2 d-flex gap-2 align-items-center">
+                            <span style="font-size:12px;color:var(--tn-text-muted);">Подтвердить соответствие и сохранить?</span>
+                            <button class="btn btn-sm btn-success py-0 px-3" @onclick="ConfirmTestMatch">
+                                <i class="fa-solid fa-check me-1"></i>Подтвердить
+                            </button>
+                        </div>
+                    }
+                </div>
+            }
+        </div>
+    </div>
+
+    <!-- Таблица сохранённых маппингов -->
+    <div class="card">
+        <div class="card-body p-0">
+            @if (!mappings.Any())
+            {
+                <div class="empty-state">
+                    <i class="fa-solid fa-shuffle d-block"></i>
+                    <div>Сопоставлений нет</div>
+                    <div style="font-size:12px;color:var(--tn-text-muted);margin-top:4px;">
+                        Они появятся после построения маршрутов из событий
+                    </div>
+                </div>
+            }
+            else
+            {
+                <table class="table table-hover mb-0" style="font-size:13px;">
+                    <thead>
+                        <tr>
+                            <th>Исходное название</th>
+                            <th>Нормализованное</th>
+                            <th>Операция справочника</th>
+                            <th>Уверенность</th>
+                            <th>Статус</th>
+                            <th>Подтверждено</th>
+                            <th></th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        @foreach (var m in mappings)
+                        {
+                            <tr>
+                                <td style="font-weight:500;max-width:200px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;" title="@m.RawName">
+                                    @m.RawName
+                                </td>
+                                <td style="font-family:monospace;font-size:11px;color:var(--tn-text-muted);">@m.NormalizedName</td>
+                                <td>
+                                    @m.Operation.Name
+                                    @if (m.Operation.Code is not null)
+                                    {
+                                        <span style="font-family:monospace;font-size:11px;color:var(--tn-text-muted);margin-left:4px;">@m.Operation.Code</span>
+                                    }
+                                </td>
+                                <td>
+                                    <strong style="color:@(m.Confidence >= 0.85m ? "#16a34a" : m.Confidence >= 0.60m ? "#d97706" : "#dc2626");">
+                                        @((m.Confidence * 100).ToString("F1"))%
+                                    </strong>
+                                </td>
+                                <td>
+                                    @if (m.IsConfirmed)
+                                    {
+                                        <span class="badge bg-success" style="font-size:11px;">Подтверждено</span>
+                                    }
+                                    else
+                                    {
+                                        <span class="badge bg-warning text-dark" style="font-size:11px;">Авто</span>
+                                    }
+                                </td>
+                                <td style="font-size:12px;color:var(--tn-text-muted);">
+                                    @if (m.ConfirmedByUser is not null && m.ConfirmedAt.HasValue)
+                                    {
+                                        <span>@m.ConfirmedByUser.FullName</span>
+                                        <br/>
+                                        <span>@m.ConfirmedAt.Value.ToLocalTime().ToString("dd.MM.yyyy")</span>
+                                    }
+                                    else
+                                    {
+                                        <span>—</span>
+                                    }
+                                </td>
+                                <td>
+                                    <button class="btn btn-sm btn-outline-danger py-0 px-2"
+                                            @onclick="() => DeleteMapping(m.Id)"
+                                            title="Удалить сопоставление">
+                                        <i class="fa-solid fa-trash-can"></i>
+                                    </button>
+                                </td>
+                            </tr>
+                        }
+                    </tbody>
+                </table>
+            }
+        </div>
+    </div>
+}
+
 <!-- === Модалка === -->
 @if (showModal)
 {
@@ -269,9 +448,14 @@
     private bool   isEditing  = false;
     private string? modalError;
 
-    private List<Operation> operations = [];
-    private List<Resource>  resources  = [];
-    private List<Material>  materials  = [];
+    private List<Operation>            operations = [];
+    private List<Resource>             resources  = [];
+    private List<Material>             materials  = [];
+    private List<OperationNameMapping> mappings   = [];
+
+    private string      testRawName = "";
+    private MatchResult? testResult;
+    private bool         isTesting  = false;
 
     private int editId;
 
@@ -319,6 +503,38 @@
         activeTab = tab;
         if (tab == 1 && !resources.Any()) resources = await ResSvc.GetAllAsync();
         if (tab == 2 && !materials.Any()) materials = await MatSvc.GetAllAsync();
+        if (tab == 3) mappings = await MatcherSvc.GetAllMappingsAsync();
+    }
+
+    private async Task TestMatch()
+    {
+        if (string.IsNullOrWhiteSpace(testRawName)) return;
+        isTesting  = true;
+        testResult = null;
+        testResult = await MatcherSvc.MatchAsync(testRawName);
+        isTesting  = false;
+    }
+
+    private void ClearTest() { testResult = null; testRawName = ""; }
+
+    private async Task ConfirmTestMatch()
+    {
+        if (testResult?.Operation is null) return;
+        await MatcherSvc.ConfirmMappingAsync(
+            testRawName, testResult.Operation.Id, testResult.Confidence, currentUserId);
+        await AuditSvc.LogAsync(currentUserId, "Сопоставление операции подтверждено вручную",
+            "OperationNameMapping", 0,
+            newValue: new { RawName = testRawName, OperationName = testResult.Operation.Name, testResult.Confidence });
+        mappings   = await MatcherSvc.GetAllMappingsAsync();
+        testResult = null;
+        testRawName = "";
+    }
+
+    private async Task DeleteMapping(int id)
+    {
+        if (!await JS.InvokeAsync<bool>("tnInterop.confirmDelete", "Удалить сопоставление?")) return;
+        await MatcherSvc.DeleteMappingAsync(id);
+        mappings.RemoveAll(m => m.Id == id);
     }
 
     private void ShowAddModal()

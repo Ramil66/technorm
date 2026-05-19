@@ -16,8 +16,9 @@ public class TechNormDbContext(DbContextOptions<TechNormDbContext> options) : Db
     public DbSet<MaterialNorm> MaterialNorms => Set<MaterialNorm>();
     public DbSet<Document> Documents => Set<Document>();
     public DbSet<CalculationHistory> CalculationHistories => Set<CalculationHistory>();
-    public DbSet<AuditLog> AuditLogs => Set<AuditLog>();
-    public DbSet<EventLog> EventLogs => Set<EventLog>();
+    public DbSet<AuditLog>             AuditLogs             => Set<AuditLog>();
+    public DbSet<EventLog>             EventLogs             => Set<EventLog>();
+    public DbSet<OperationNameMapping> OperationNameMappings => Set<OperationNameMapping>();
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
@@ -193,6 +194,24 @@ public class TechNormDbContext(DbContextOptions<TechNormDbContext> options) : Db
             e.HasOne(x => x.Product).WithMany().HasForeignKey(x => x.ProductId);
             e.HasOne(x => x.SourceDocument).WithMany().HasForeignKey(x => x.SourceDocumentId);
             e.HasOne(x => x.Creator).WithMany().HasForeignKey(x => x.CreatedBy);
+        });
+
+        modelBuilder.Entity<OperationNameMapping>(e =>
+        {
+            e.ToTable("operation_name_mappings");
+            e.HasKey(x => x.Id);
+            e.Property(x => x.Id).HasColumnName("id");
+            e.Property(x => x.RawName).HasColumnName("raw_name").HasMaxLength(512);
+            e.Property(x => x.NormalizedName).HasColumnName("normalized_name").HasMaxLength(512);
+            e.Property(x => x.OperationId).HasColumnName("operation_id");
+            e.Property(x => x.Confidence).HasColumnName("confidence").HasColumnType("numeric(5,4)");
+            e.Property(x => x.IsConfirmed).HasColumnName("is_confirmed");
+            e.Property(x => x.ConfirmedBy).HasColumnName("confirmed_by");
+            e.Property(x => x.ConfirmedAt).HasColumnName("confirmed_at");
+            e.Property(x => x.CreatedAt).HasColumnName("created_at");
+            e.HasIndex(x => x.RawName).IsUnique();
+            e.HasOne(x => x.Operation).WithMany().HasForeignKey(x => x.OperationId).OnDelete(DeleteBehavior.Cascade);
+            e.HasOne(x => x.ConfirmedByUser).WithMany().HasForeignKey(x => x.ConfirmedBy);
         });
 
         modelBuilder.Entity<AuditLog>(e =>

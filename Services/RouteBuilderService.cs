@@ -25,15 +25,27 @@ public class MinerActivityInfo
     public List<MinerResourceInfo> ResourceStats { get; set; } = [];
 }
 
+public class MinerTransitionInfo
+{
+    public string  From       { get; set; } = "";
+    public string  To         { get; set; } = "";
+    public int     Count      { get; set; }
+    public decimal Confidence { get; set; }
+    public bool    IsRare     { get; set; }
+}
+
 public class MinerResult
 {
     public bool Success { get; set; }
     public string? ErrorMessage { get; set; }
     public int TotalCases { get; set; }
     public int TotalEvents { get; set; }
-    public List<MinerActivityInfo> Activities { get; set; } = [];
-    public List<List<string>>      Stages     { get; set; } = [];
-    public decimal OverallConfidence { get; set; }
+    public List<MinerActivityInfo>   Activities          { get; set; } = [];
+    public List<List<string>>        Stages              { get; set; } = [];
+    public decimal                   OverallConfidence   { get; set; }
+    public decimal                   Coverage            { get; set; }
+    public int                       RareTransitionCount { get; set; }
+    public List<MinerTransitionInfo> Transitions         { get; set; } = [];
 }
 
 
@@ -51,8 +63,11 @@ public class RouteBuilderService(
     IDbContextFactory<TechNormDbContext> factory,
     ITechRouteService                   routeSvc,
     IRouteStepService                   stepSvc,
-    ITimeNormService                    timeNormSvc) : IRouteBuilderService
+    ITimeNormService                    timeNormSvc,
+    IOperationMatcherService            matcherSvc) : IRouteBuilderService
 {
+    private const decimal RareTransitionThreshold = 10m;
+
     public async Task<MinerResult> MineFromEventsAsync(int productId)
     {
         await using var db = await factory.CreateDbContextAsync();
@@ -70,7 +85,18 @@ public class RouteBuilderService(
                 ErrorMessage = "Для данного изделия в журнале событий записей нет",
             };
 
-        var traces = events
+        // Coverage: отбираем только события с непустой активностью
+        var validEvents = events.Where(e => !string.IsNullOrWhiteSpace(e.Activity)).ToList();
+        var coverage    = Math.Round(validEvents.Count * 100m / events.Count, 1);
+
+        if (validEvents.Count == 0)
+            return new MinerResult
+            {
+                Success      = false,
+                ErrorMessage = "Нет событий с заполненной активностью для построения маршрута",
+            };
+
+        var traces = validEvents
             .GroupBy(e => e.CaseId)
             .Select(g => g.OrderBy(e => e.Timestamp).ToList())
             .ToList();
@@ -139,6 +165,33 @@ public class RouteBuilderService(
             }
         }
 
+        // Transition Confidence: C(A→B) = Count(A→B) / Σ Count(A→X) * 100
+        var outTotals = dfg
+            .GroupBy(kv => kv.Key.From)
+            .ToDictionary(g => g.Key, g => g.Sum(kv => kv.Value));
+
+        var transitions = dfg
+            .Select(kv =>
+            {
+                var outTotal = outTotals.GetValueOrDefault(kv.Key.From, 0);
+                var conf     = outTotal > 0 ? Math.Round(kv.Value * 100m / outTotal, 1) : 0m;
+                // Rare: переход встречается менее чем в RareTransitionThreshold% исходящих из From
+                return new MinerTransitionInfo
+                {
+                    From       = kv.Key.From,
+                    To         = kv.Key.To,
+                    Count      = kv.Value,
+                    Confidence = conf,
+                    IsRare     = conf < RareTransitionThreshold,
+                };
+            })
+            .OrderBy(t => t.From)
+            .ThenByDescending(t => t.Count)
+            .ThenBy(t => t.To)
+            .ToList();
+
+        var rareTransitionCount = transitions.Count(t => t.IsRare);
+
         var ordered = InductiveMinerOrder(allActs, dfg, startCnt, endCnt);
         var stages  = DetectParallelStages(ordered, dfg);
 
@@ -163,7 +216,7 @@ public class RouteBuilderService(
             return new MinerActivityInfo
             {
                 Name             = act,
-                TotalOccurrences = events.Count(e => e.Activity == act),
+                TotalOccurrences = validEvents.Count(e => e.Activity == act),
                 CaseCount        = caseCount,
                 Confidence       = totalCases > 0
                                    ? Math.Round(caseCount * 100m / totalCases, 1)
@@ -182,12 +235,15 @@ public class RouteBuilderService(
 
         return new MinerResult
         {
-            Success           = true,
-            TotalCases        = totalCases,
-            TotalEvents       = events.Count,
-            Activities        = actInfos,
-            Stages            = stages,
-            OverallConfidence = overallConf,
+            Success             = true,
+            TotalCases          = totalCases,
+            TotalEvents         = events.Count,
+            Activities          = actInfos,
+            Stages              = stages,
+            OverallConfidence   = overallConf,
+            Coverage            = coverage,
+            RareTransitionCount = rareTransitionCount,
+            Transitions         = transitions,
         };
     }
 
@@ -195,7 +251,6 @@ public class RouteBuilderService(
         MinerResult result, int productId, string routeName, int userId)
     {
         await using var db = await factory.CreateDbContextAsync();
-        var operations = await db.Operations.ToListAsync();
         var resources  = await db.Resources.ToListAsync();
         var actLookup  = result.Activities.ToDictionary(a => a.Name);
 
@@ -222,9 +277,9 @@ public class RouteBuilderService(
             foreach (var actName in path)
             {
                 seqNum++;
-                var act = actLookup.GetValueOrDefault(actName);
-                var op  = operations.FirstOrDefault(o =>
-                    string.Equals(o.Name, actName, StringComparison.OrdinalIgnoreCase));
+                var act   = actLookup.GetValueOrDefault(actName);
+                var match = await matcherSvc.MatchAsync(actName);
+                var op    = match.Status != MatchStatus.Unmatched ? match.Operation : null;
 
                 var step = await stepSvc.CreateAsync(new RouteStep
                 {
@@ -289,7 +344,6 @@ public class RouteBuilderService(
         await db.MaterialNorms.Where(m => stepIds.Contains(m.RouteStepId)).ExecuteDeleteAsync();
         await db.RouteSteps.Where(s => s.RouteId == route.Id).ExecuteDeleteAsync();
 
-        var operations = await db.Operations.ToListAsync();
         var resources  = await db.Resources.ToListAsync();
         var actLookup  = result.Activities.ToDictionary(a => a.Name);
 
@@ -299,8 +353,8 @@ public class RouteBuilderService(
             seqNum++;
             var actName = stage[0]; // flatten parallel — take first activity per stage
             var act     = actLookup.GetValueOrDefault(actName);
-            var op      = operations.FirstOrDefault(o =>
-                string.Equals(o.Name, actName, StringComparison.OrdinalIgnoreCase));
+            var match   = await matcherSvc.MatchAsync(actName);
+            var op      = match.Status != MatchStatus.Unmatched ? match.Operation : null;
 
             var step = await stepSvc.CreateAsync(new RouteStep
             {
@@ -361,7 +415,6 @@ public class RouteBuilderService(
         await db.MaterialNorms.Where(m => stepIds.Contains(m.RouteStepId)).ExecuteDeleteAsync();
         await db.RouteSteps.Where(s => s.RouteId == routeId).ExecuteDeleteAsync();
 
-        var operations = await db.Operations.ToListAsync();
         var resources  = await db.Resources.ToListAsync();
         var actLookup  = result.Activities.ToDictionary(a => a.Name);
 
@@ -371,8 +424,8 @@ public class RouteBuilderService(
             seqNum++;
             var actName = stage[0];
             var act     = actLookup.GetValueOrDefault(actName);
-            var op      = operations.FirstOrDefault(o =>
-                string.Equals(o.Name, actName, StringComparison.OrdinalIgnoreCase));
+            var match   = await matcherSvc.MatchAsync(actName);
+            var op      = match.Status != MatchStatus.Unmatched ? match.Operation : null;
 
             var step = await stepSvc.CreateAsync(new RouteStep
             {

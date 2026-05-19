@@ -7,6 +7,7 @@
 @inject IResourceService ResourceSvc
 @inject IAuditLogService AuditSvc
 @inject IRouteBuilderService RouteBuildSvc
+@inject IOperationMatcherService MatcherSvc
 
 <PageTitle>Журнал событий — ТехНорм</PageTitle>
 
@@ -54,7 +55,43 @@
                         </div>
                         <div class="col-md-6">
                             <label class="form-label">Наименование операции</label>
-                            <input class="form-control" placeholder="Введите название операции" @bind="form.Activity" />
+                            <input class="form-control" placeholder="Введите название операции"
+                                   value="@form.Activity" @onchange="OnActivityChanged" />
+                            @if (isMatchingActivity)
+                            {
+                                <div class="mt-1" style="font-size:12px;color:#64748b;">
+                                    <span class="spinner-border spinner-border-sm me-1" style="width:12px;height:12px;border-width:2px;"></span>Сопоставление...
+                                </div>
+                            }
+                            else if (activityMatchResult is not null)
+                            {
+                                @if (activityMatchResult.Status == MatchStatus.AutoMatched && activityMatchResult.Operation is not null)
+                                {
+                                    <div class="mt-1 d-flex align-items-center gap-1" style="font-size:12px;color:#16a34a;">
+                                        <i class="fa-solid fa-circle-check"></i>
+                                        Сопоставлено: <strong class="ms-1">@activityMatchResult.Operation.Name</strong>
+                                        <span class="ms-1" style="color:#86efac;">(@((int)(activityMatchResult.Confidence * 100))%)</span>
+                                    </div>
+                                }
+                                else if (activityMatchResult.Status == MatchStatus.NeedsConfirm && activityMatchResult.Operation is not null)
+                                {
+                                    <div class="mt-1 d-flex align-items-center gap-2" style="font-size:12px;background:#fef9c3;border-radius:4px;padding:4px 8px;border:1px solid #fde047;">
+                                        <i class="fa-solid fa-circle-question" style="color:#ca8a04;"></i>
+                                        <span>Возможное соответствие: <strong>@activityMatchResult.Operation.Name</strong>
+                                            <span style="color:#78716c;">(@((int)(activityMatchResult.Confidence * 100))%)</span></span>
+                                        <button class="btn py-0 px-2 ms-auto" style="font-size:11px;background:#fef08a;border:1px solid #ca8a04;color:#713f12;"
+                                                @onclick="ConfirmActivityMatch">
+                                            <i class="fa-solid fa-check me-1"></i>Подтвердить
+                                        </button>
+                                    </div>
+                                }
+                                else if (activityMatchResult.Status == MatchStatus.Unmatched)
+                                {
+                                    <div class="mt-1" style="font-size:12px;color:#94a3b8;">
+                                        <i class="fa-solid fa-circle-xmark"></i> Операция не найдена в справочнике
+                                    </div>
+                                }
+                            }
                         </div>
                         <div class="col-md-3">
                             <label class="form-label">Дата и время</label>
@@ -336,8 +373,10 @@
     private string filterSource    = "";
     private string filterSearch    = "";
 
-    private EventForm form = new();
-    private int currentUserId;
+    private EventForm     form                = new();
+    private int           currentUserId;
+    private MatchResult?  activityMatchResult;
+    private bool          isMatchingActivity  = false;
 
     private bool      showEditModal = false;
     private EventLog? editingEvent;
@@ -401,6 +440,45 @@
         }
     }
 
+    private async Task OnActivityChanged(ChangeEventArgs e)
+    {
+        form.Activity       = e.Value?.ToString() ?? string.Empty;
+        activityMatchResult = null;
+        if (string.IsNullOrWhiteSpace(form.Activity)) return;
+
+        isMatchingActivity = true;
+        StateHasChanged();
+        try
+        {
+            activityMatchResult = await MatcherSvc.MatchAsync(form.Activity);
+            if (activityMatchResult.Status == MatchStatus.AutoMatched &&
+                activityMatchResult.Operation is not null && !form.OperationId.HasValue)
+            {
+                form.OperationId = activityMatchResult.Operation.Id;
+            }
+        }
+        finally
+        {
+            isMatchingActivity = false;
+        }
+    }
+
+    private async Task ConfirmActivityMatch()
+    {
+        if (activityMatchResult?.Operation is null) return;
+        form.OperationId = activityMatchResult.Operation.Id;
+        await MatcherSvc.ConfirmMappingAsync(form.Activity, activityMatchResult.Operation.Id,
+            activityMatchResult.Confidence, currentUserId);
+        activityMatchResult = new MatchResult
+        {
+            Status          = MatchStatus.AutoMatched,
+            Operation       = activityMatchResult.Operation,
+            Confidence      = activityMatchResult.Confidence,
+            NormalizedInput = activityMatchResult.NormalizedInput,
+            WasCached       = false,
+        };
+    }
+
     private async Task SaveEvent()
     {
         formError = null;
@@ -424,6 +502,10 @@
         };
 
         var created = await EventSvc.CreateAsync(ev);
+
+        if (activityMatchResult is { Status: MatchStatus.AutoMatched, Operation: not null, WasCached: false })
+            await MatcherSvc.ConfirmMappingAsync(form.Activity.Trim(), activityMatchResult.Operation.Id,
+                activityMatchResult.Confidence, currentUserId);
         await AuditSvc.LogAsync(currentUserId, "Событие добавлено вручную", "EventLog", (int?)created.Id,
             null, new { created.CaseId, created.Activity, ProductId = created.ProductId });
         if (created.ProductId.HasValue)
@@ -525,7 +607,11 @@
         if (e.ResourceId.HasValue) e.Resource = resources.FirstOrDefault(r => r.Id == e.ResourceId.Value);
     }
 
-    private void ResetForm() => form = new EventForm();
+    private void ResetForm()
+    {
+        form                = new EventForm();
+        activityMatchResult = null;
+    }
     private void ToggleForm() => showForm = !showForm;
 
     private static string? GetMeta(EventLog e, string key)

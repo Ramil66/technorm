@@ -8,6 +8,7 @@
 @inject IProductService       ProdSvc
 @inject IAuditLogService      AuditSvc
 @inject IRouteBuilderService  RouteBuildSvc
+@inject IOperationMatcherService MatcherSvc
 @using System.Text.Json
 
 <PageTitle>Загрузка файлов — ТехНорм</PageTitle>
@@ -302,7 +303,41 @@
                                     </td>
                                     <td>
                                         <input value="@row.Activity"
-                                               @onchange="e => row.Activity = e.Value?.ToString() ?? string.Empty" />
+                                               @onchange="async e => { row.Activity = e.Value?.ToString() ?? string.Empty; await MatchRowActivity(row); }" />
+                                        @{rowMatchResults.TryGetValue(row, out var rowMr);}
+                                        @if (rowMr is not null)
+                                        {
+                                            @if (rowMr.Status == MatchStatus.AutoMatched && rowMr.Operation is not null)
+                                            {
+                                                <div style="font-size:10px;color:#16a34a;margin-top:2px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;"
+                                                     title="@rowMr.Operation.Name">
+                                                    <i class="fa-solid fa-circle-check"></i> @rowMr.Operation.Name
+                                                </div>
+                                            }
+                                            else if (rowMr.Status == MatchStatus.NeedsConfirm && rowMr.Operation is not null)
+                                            {
+                                                <div style="font-size:10px;margin-top:2px;display:flex;align-items:center;gap:3px;">
+                                                    <span style="color:#ca8a04;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;"
+                                                          title="@rowMr.Operation.Name">
+                                                        <i class="fa-solid fa-circle-question"></i> @rowMr.Operation.Name (@((int)(rowMr.Confidence * 100))%)
+                                                    </span>
+                                                    <button class="btn py-0 px-1 flex-shrink-0"
+                                                            style="font-size:10px;background:#fef08a;border:1px solid #ca8a04;color:#713f12;line-height:1.4;"
+                                                            title="Подтвердить"
+                                                            @onclick="async () => await ConfirmRowMatch(row)">✓</button>
+                                                </div>
+                                            }
+                                            else if (rowMr.Status == MatchStatus.Unmatched)
+                                            {
+                                                <div style="font-size:10px;color:#94a3b8;margin-top:2px;">
+                                                    <i class="fa-solid fa-circle-xmark"></i> не найдено
+                                                </div>
+                                            }
+                                        }
+                                        else if (isMatching && !string.IsNullOrWhiteSpace(row.Activity))
+                                        {
+                                            <div style="font-size:10px;color:#94a3b8;margin-top:2px;">...</div>
+                                        }
                                     </td>
                                     <td>
                                         <input value="@row.DateStr"
@@ -412,6 +447,8 @@
     private string        previewDocName = "";
     private int           previewDocId   = 0;
     private List<ParsedRow> previewRows  = [];
+    private Dictionary<ParsedRow, MatchResult?> rowMatchResults = [];
+    private bool isMatching = false;
 
     protected override async Task OnInitializedAsync()
     {
@@ -512,13 +549,16 @@
         {
             isParsing = false;
         }
+
+        await RunMatchingForRows();
     }
 
     private void ClosePreview()
     {
         if (isSaving) return;
-        showPreview = false;
-        saveError   = null;
+        showPreview     = false;
+        saveError       = null;
+        rowMatchResults = [];
     }
 
     private void AddEmptyRow() =>
@@ -541,6 +581,16 @@
 
         try
         {
+            foreach (var row in previewRows)
+            {
+                if (rowMatchResults.TryGetValue(row, out var mr) && mr is not null &&
+                    mr.Status == MatchStatus.AutoMatched && mr.Operation is not null && !mr.WasCached)
+                {
+                    try { await MatcherSvc.ConfirmMappingAsync(row.Activity.Trim(), mr.Operation.Id, mr.Confidence, currentUserId); }
+                    catch { /* non-critical */ }
+                }
+            }
+
             var eventLogs = previewRows.Select(r =>
             {
                 var meta = JsonDocument.Parse(System.Text.Json.JsonSerializer.Serialize(new
@@ -594,6 +644,46 @@
         {
             isSaving = false;
         }
+    }
+
+    private async Task RunMatchingForRows()
+    {
+        isMatching      = true;
+        rowMatchResults = [];
+        StateHasChanged();
+        foreach (var row in previewRows)
+        {
+            if (!string.IsNullOrWhiteSpace(row.Activity))
+                rowMatchResults[row] = await MatcherSvc.MatchAsync(row.Activity);
+        }
+        isMatching = false;
+    }
+
+    private async Task MatchRowActivity(ParsedRow row)
+    {
+        if (string.IsNullOrWhiteSpace(row.Activity))
+        {
+            rowMatchResults.Remove(row);
+            StateHasChanged();
+            return;
+        }
+        rowMatchResults[row] = await MatcherSvc.MatchAsync(row.Activity);
+        StateHasChanged();
+    }
+
+    private async Task ConfirmRowMatch(ParsedRow row)
+    {
+        if (!rowMatchResults.TryGetValue(row, out var mr) || mr?.Operation is null) return;
+        await MatcherSvc.ConfirmMappingAsync(row.Activity, mr.Operation.Id, mr.Confidence, currentUserId);
+        rowMatchResults[row] = new MatchResult
+        {
+            Status          = MatchStatus.AutoMatched,
+            Operation       = mr.Operation,
+            Confidence      = mr.Confidence,
+            NormalizedInput = mr.NormalizedInput,
+            WasCached       = false,
+        };
+        StateHasChanged();
     }
 
     private void OpenFileViewer(Document doc) => viewerDoc = doc;

@@ -53,6 +53,7 @@ builder.Services.AddSingleton<INsiUpdateService, NsiUpdateService>();
 builder.Services.AddScoped<IDashboardService, DashboardService>();
 builder.Services.AddScoped<IDocumentParserService, DocumentParserService>();
 builder.Services.AddScoped<IRouteBuilderService, RouteBuilderService>();
+builder.Services.AddScoped<IOperationMatcherService, OperationMatcherService>();
 
 var app = builder.Build();
 
