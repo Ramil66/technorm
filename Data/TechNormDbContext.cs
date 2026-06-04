@@ -95,6 +95,12 @@ public class TechNormDbContext(DbContextOptions<TechNormDbContext> options) : Db
             e.Property(x => x.CreatedAt).HasColumnName("created_at");
             e.Property(x => x.PublishedAt).HasColumnName("published_at");
             e.Property(x => x.UpdatedAt).HasColumnName("updated_at");
+            e.Property(x => x.SourceEventCount).HasColumnName("source_event_count");
+            e.Property(x => x.IsAutoUpdate).HasColumnName("is_auto_update");
+            e.Property(x => x.LastPci).HasColumnName("last_pci").HasColumnType("numeric(6,2)");
+            e.Property(x => x.LastPciStatus).HasColumnName("last_pci_status").HasMaxLength(32);
+            e.Property(x => x.LastPciCalculatedAt).HasColumnName("last_pci_calculated_at");
+            e.Property(x => x.LastPciSummary).HasColumnName("last_pci_summary").HasMaxLength(512);
             e.HasOne(x => x.Product).WithMany(p => p.TechRoutes).HasForeignKey(x => x.ProductId).OnDelete(DeleteBehavior.Cascade);
             e.HasOne(x => x.Creator).WithMany(u => u.TechRoutes).HasForeignKey(x => x.CreatedBy);
         });

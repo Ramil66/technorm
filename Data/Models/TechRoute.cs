@@ -7,7 +7,7 @@ public class TechRoute
     public int Id { get; set; }
     public int ProductId { get; set; }
     public int Version { get; set; } = 1;
-    public string Status { get; set; } = "draft"; // draft | published | archived
+    public string Status { get; set; } = "draft";
     public string Name { get; set; } = null!;
     public JsonDocument? ProcessTree { get; set; }
     public int? CreatedBy { get; set; }
@@ -16,6 +16,11 @@ public class TechRoute
     public DateTime UpdatedAt { get; set; } = DateTime.UtcNow;
     public int?  SourceEventCount { get; set; }
     public bool  IsAutoUpdate     { get; set; } = false;
+
+    public decimal? LastPci              { get; set; }
+    public string?  LastPciStatus        { get; set; }
+    public DateTime? LastPciCalculatedAt { get; set; }
+    public string?  LastPciSummary       { get; set; }
 
     public Product Product { get; set; } = null!;
     public User? Creator { get; set; }

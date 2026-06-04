@@ -1,4 +1,5 @@
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Logging;
 using TechNormBlazor.Data;
 using TechNormBlazor.Data.Models;
 
@@ -15,7 +16,10 @@ public interface IEventLogService
     Task DeleteAsync(long id);
 }
 
-public class EventLogService(IDbContextFactory<TechNormDbContext> factory) : IEventLogService
+public class EventLogService(
+    IDbContextFactory<TechNormDbContext> factory,
+    IConformanceCheckingService          conformanceSvc,
+    ILogger<EventLogService>             logger) : IEventLogService
 {
     public async Task<List<EventLog>> GetAllAsync()
     {
@@ -57,6 +61,10 @@ public class EventLogService(IDbContextFactory<TechNormDbContext> factory) : IEv
         using var db = await factory.CreateDbContextAsync();
         db.EventLogs.Add(eventLog);
         await db.SaveChangesAsync();
+
+        if (eventLog.ProductId.HasValue)
+            await TriggerPciAsync(eventLog.ProductId.Value);
+
         return eventLog;
     }
 
@@ -69,7 +77,26 @@ public class EventLogService(IDbContextFactory<TechNormDbContext> factory) : IEv
         using var db = await factory.CreateDbContextAsync();
         db.EventLogs.AddRange(list);
         await db.SaveChangesAsync();
+
+        foreach (var pid in list.Where(e => e.ProductId.HasValue)
+                                .Select(e => e.ProductId!.Value)
+                                .Distinct())
+            await TriggerPciAsync(pid);
+
         return list;
+    }
+
+    private async Task TriggerPciAsync(int productId)
+    {
+        try
+        {
+            await conformanceSvc.TriggerRecalculationAsync(productId);
+        }
+        catch (Exception ex)
+        {
+            logger.LogWarning(ex,
+                "PCI recalculation failed after event creation for product {ProductId}", productId);
+        }
     }
 
     public async Task UpdateAsync(EventLog eventLog)

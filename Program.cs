@@ -7,6 +7,7 @@ using TechNormBlazor.Data;
 using TechNormBlazor.Data.Models;
 using TechNormBlazor.Data.Seeder;
 using TechNormBlazor.Services;
+using TechNormBlazor.Services.Analytics;
 
 var builder = WebApplication.CreateBuilder(args);
 
@@ -54,6 +55,8 @@ builder.Services.AddScoped<IDashboardService, DashboardService>();
 builder.Services.AddScoped<IDocumentParserService, DocumentParserService>();
 builder.Services.AddScoped<IRouteBuilderService, RouteBuilderService>();
 builder.Services.AddScoped<IOperationMatcherService, OperationMatcherService>();
+builder.Services.AddScoped<IConformanceCheckingService, ConformanceCheckingService>();
+builder.Services.AddScoped<IAnalyticsService, AnalyticsService>();
 
 var app = builder.Build();
 

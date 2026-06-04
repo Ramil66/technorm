@@ -20,7 +20,9 @@ public interface ITechRouteService
     Task<TechRoute> DuplicateAsync(int sourceId, string newName, int userId);
 }
 
-public class TechRouteService(IDbContextFactory<TechNormDbContext> factory) : ITechRouteService
+public class TechRouteService(
+    IDbContextFactory<TechNormDbContext> factory,
+    IConformanceCheckingService          conformanceSvc) : ITechRouteService
 {
     public async Task<List<TechRoute>> GetAllAsync()
     {
@@ -106,6 +108,9 @@ public class TechRouteService(IDbContextFactory<TechNormDbContext> factory) : IT
                 .SetProperty(r => r.Status, "published")
                 .SetProperty(r => r.PublishedAt, DateTime.UtcNow)
                 .SetProperty(r => r.UpdatedAt, DateTime.UtcNow));
+
+        try { await conformanceSvc.TriggerRecalculationAsync(route.ProductId); }
+        catch { }
     }
 
     public async Task ArchiveAsync(int id)
