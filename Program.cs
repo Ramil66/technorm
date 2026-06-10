@@ -79,6 +79,19 @@ app.MapStaticAssets();
 app.MapRazorComponents<App>()
     .AddInteractiveServerRenderMode();
 
+app.MapPost("/account/login", async (HttpContext ctx, IAuthService authService) =>
+{
+    var form = await ctx.Request.ReadFormAsync();
+    var username = form["Username"].FirstOrDefault() ?? "";
+    var password = form["Password"].FirstOrDefault() ?? "";
+
+    var result = await authService.LoginAsync(username, password, ctx);
+
+    return result.Success
+        ? Results.Redirect("/")
+        : Results.Redirect("/login?error=" + Uri.EscapeDataString(result.Error ?? "Неверный логин или пароль"));
+});
+
 app.MapGet("/api/files/{id:int}", async (int id, HttpContext ctx, IDocumentService docSvc) =>
 {
     if (ctx.User.Identity?.IsAuthenticated != true)

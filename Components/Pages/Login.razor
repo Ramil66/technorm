@@ -1,7 +1,6 @@
 @page "/login"
 @layout EmptyLayout
 @using Microsoft.AspNetCore.Http
-@inject IAuthService AuthService
 @inject NavigationManager Nav
 
 <PageTitle>Вход — ТехНорм</PageTitle>
@@ -215,7 +214,7 @@
         <div class="ln-divider"></div>
 
         <!-- Форма -->
-        <form method="post" @formname="login">
+        <form method="post" action="/account/login">
             <AntiforgeryToken />
 
             <!-- Логин -->
@@ -232,7 +231,6 @@
                     </span>
                     <input id="ln-username" class="ln-input"
                            type="text" name="Username"
-                           value="@Username"
                            placeholder="Введите логин"
                            autocomplete="username"
                            required />
@@ -312,31 +310,12 @@
     [CascadingParameter]
     public HttpContext? HttpContext { get; set; }
 
-    [SupplyParameterFromForm(FormName = "login")]
-    public string? Username { get; set; }
-
-    [SupplyParameterFromForm(FormName = "login")]
-    public string? Password { get; set; }
-
+    [SupplyParameterFromQuery(Name = "error")]
     public string? ErrorMessage { get; set; }
 
-    protected override async Task OnInitializedAsync()
+    protected override void OnInitialized()
     {
         if (HttpContext?.User.Identity?.IsAuthenticated == true)
-        {
             Nav.NavigateTo("/", forceLoad: true);
-            return;
-        }
-
-        if (HttpMethods.IsPost(HttpContext?.Request.Method ?? "GET"))
-        {
-            var result = await AuthService.LoginAsync(
-                Username ?? "", Password ?? "", HttpContext!);
-
-            if (result.Success)
-                Nav.NavigateTo("/", forceLoad: true);
-            else
-                ErrorMessage = result.Error;
-        }
     }
 }
