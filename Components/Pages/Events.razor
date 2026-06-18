@@ -1,6 +1,7 @@
 @page "/events"
 @attribute [Authorize]
 @rendermode InteractiveServer
+@implements IDisposable
 @inject IEventLogService EventSvc
 @inject IProductService ProductSvc
 @inject IOperationService OperationSvc
@@ -8,12 +9,19 @@
 @inject IAuditLogService AuditSvc
 @inject IRouteBuilderService RouteBuildSvc
 @inject IOperationMatcherService MatcherSvc
+@inject IJSRuntime JS
 
 <PageTitle>Журнал событий — ТехНорм</PageTitle>
 
 <div class="page-header">
     <h1><i class="fa-solid fa-bolt" style="color:var(--tn-blue);margin-right:10px;font-size:18px;"></i>Журнал событий</h1>
-    <span class="text-muted" style="font-size:13px;">@filteredEvents.Count из @allEvents.Count записей</span>
+    <span class="text-muted" style="font-size:13px;">
+        @if (isLoading)
+        {
+            <span class="spinner-border spinner-border-sm me-1" style="width:12px;height:12px;border-width:2px;"></span>
+        }
+        @totalCount.ToString("N0") записей
+    </span>
 </div>
 
 <AuthorizeView Roles="technologist">
@@ -178,7 +186,7 @@
 <!-- Таблица -->
 <div class="card">
     <div class="card-body p-0">
-        @if (!filteredEvents.Any())
+        @if (!isLoading && !pagedItems.Any())
         {
             <div class="empty-state">
                 <i class="fa-solid fa-bolt d-block"></i>
@@ -203,7 +211,7 @@
                         </tr>
                     </thead>
                     <tbody>
-                        @foreach (var e in filteredEvents)
+                        @foreach (var e in pagedItems)
                         {
                             <tr>
                                 <td style="font-family:monospace;font-size:12px;">@e.CaseId</td>
@@ -250,6 +258,22 @@
             </div>
         }
     </div>
+    @if (hasMore || isLoadingMore)
+    {
+        <div id="tn-scroll-sentinel" style="padding:16px;text-align:center;color:#94a3b8;font-size:13px;">
+            @if (isLoadingMore)
+            {
+                <span class="spinner-border spinner-border-sm me-2" style="width:14px;height:14px;border-width:2px;"></span>
+                <span>Загрузка событий...</span>
+            }
+        </div>
+    }
+    else if (pagedItems.Count > 0)
+    {
+        <div style="padding:10px 16px;text-align:center;color:#94a3b8;font-size:12px;">
+            Показано все @pagedItems.Count.ToString("N0") записей из @totalCount.ToString("N0")
+        </div>
+    }
 </div>
 
 <!-- ── Модалка редактирования ── -->
@@ -361,8 +385,16 @@
 @code {
     [CascadingParameter] private Task<AuthenticationState> AuthStateTask { get; set; } = default!;
 
-    private List<EventLog>  allEvents      = [];
-    private List<EventLog>  filteredEvents = [];
+    private List<EventLog>  pagedItems     = [];
+    private int             totalCount     = 0;
+    private int             currentPage    = 1;
+    private const int       pageSize       = 200;
+    private bool            isLoading      = false;
+    private bool            isLoadingMore  = false;
+    private bool            hasMore        = false;
+    private int             _lastRenderedCount = -1;
+    private DotNetObjectReference<Events>? _dotnetRef;
+
     private List<Product>   products       = [];
     private List<Operation> operations     = [];
     private List<Resource>  resources      = [];
@@ -407,27 +439,89 @@
         var state = await AuthStateTask;
         currentUserId = int.Parse(state.User.FindFirst("UserId")?.Value ?? "0");
 
-        var t1 = EventSvc.GetAllAsync();
         var t2 = ProductSvc.GetAllAsync();
         var t3 = OperationSvc.GetAllAsync();
         var t4 = ResourceSvc.GetAllAsync();
-        await Task.WhenAll(t1, t2, t3, t4);
+        await Task.WhenAll(t2, t3, t4);
 
-        allEvents  = t1.Result;
         products   = t2.Result;
         operations = t3.Result;
         resources  = t4.Result;
-        ApplyFilter();
+        await LoadPageAsync(1);
     }
 
-    private void ApplyFilter()
+    private async Task LoadPageAsync(int page)
     {
-        filteredEvents = allEvents
-            .Where(e => filterProductId == 0 || e.ProductId == filterProductId)
-            .Where(e => string.IsNullOrEmpty(filterSource) || e.Source == filterSource)
-            .Where(e => string.IsNullOrEmpty(filterSearch) ||
-                        e.Activity.Contains(filterSearch, StringComparison.OrdinalIgnoreCase))
-            .ToList();
+        isLoading   = true;
+        currentPage = page;
+        StateHasChanged();
+        try
+        {
+            var result = await EventSvc.GetPagedAsync(
+                page, pageSize,
+                filterProductId > 0 ? filterProductId : null,
+                string.IsNullOrEmpty(filterSource) ? null : filterSource,
+                string.IsNullOrEmpty(filterSearch) ? null : filterSearch);
+            pagedItems = result.Items;
+            totalCount = result.Total;
+            hasMore    = result.Items.Count == pageSize && pagedItems.Count < totalCount;
+        }
+        finally
+        {
+            isLoading = false;
+        }
+    }
+
+    private async Task ApplyFilter()
+    {
+        await LoadPageAsync(1);
+    }
+
+    [JSInvokable]
+    public async Task OnScrolledToBottom()
+    {
+        if (isLoadingMore || !hasMore) return;
+        isLoadingMore = true;
+        await InvokeAsync(StateHasChanged);
+        try
+        {
+            var nextPage = currentPage + 1;
+            var result   = await EventSvc.GetPagedAsync(
+                nextPage, pageSize,
+                filterProductId > 0 ? filterProductId : null,
+                string.IsNullOrEmpty(filterSource) ? null : filterSource,
+                string.IsNullOrEmpty(filterSearch) ? null : filterSearch);
+            if (result.Items.Count > 0)
+            {
+                pagedItems.AddRange(result.Items);
+                currentPage = nextPage;
+            }
+            hasMore = result.Items.Count == pageSize && pagedItems.Count < totalCount;
+        }
+        finally
+        {
+            isLoadingMore = false;
+            await InvokeAsync(StateHasChanged);
+        }
+    }
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (firstRender)
+        {
+            _dotnetRef = DotNetObjectReference.Create(this);
+        }
+        if (_dotnetRef is not null && hasMore && pagedItems.Count != _lastRenderedCount)
+        {
+            _lastRenderedCount = pagedItems.Count;
+            await JS.InvokeVoidAsync("tnInterop.setupInfiniteScroll", _dotnetRef, "tn-scroll-sentinel");
+        }
+    }
+
+    public void Dispose()
+    {
+        JS.InvokeVoidAsync("tnInterop.disposeInfiniteScroll");
+        _dotnetRef?.Dispose();
     }
 
     private void FillActivity()
@@ -510,9 +604,7 @@
             null, new { created.CaseId, created.Activity, ProductId = created.ProductId });
         if (created.ProductId.HasValue)
             await RouteBuildSvc.AutoUpdateIfEnabledAsync(created.ProductId.Value, currentUserId);
-        EnrichLocal(created);
-        allEvents.Insert(0, created);
-        ApplyFilter();
+        await LoadPageAsync(1);
         ResetForm();
         showForm = false;
     }
@@ -558,7 +650,7 @@
             await AuditSvc.LogAsync(currentUserId, "Событие изменено", "EventLog", (int?)editingEvent.Id,
                 null, new { editingEvent.CaseId, editingEvent.Activity, ProductId = editingEvent.ProductId });
 
-            var local = allEvents.FirstOrDefault(e => e.Id == editingEvent.Id);
+            var local = pagedItems.FirstOrDefault(e => e.Id == editingEvent.Id);
             if (local is not null)
             {
                 local.CaseId     = editingEvent.CaseId;
@@ -571,7 +663,6 @@
                 local.Product    = products.FirstOrDefault(p => p.Id == editingEvent.ProductId);
                 local.Resource   = resources.FirstOrDefault(r => r.Id == editingEvent.ResourceId);
             }
-            ApplyFilter();
             CloseEditModal();
         }
         finally { isSavingEdit = false; }
@@ -592,19 +683,12 @@
     private async Task ConfirmDelete()
     {
         showDeleteConfirm = false;
-        var deleted = allEvents.FirstOrDefault(e => e.Id == pendingDeleteId);
+        var deleted = pagedItems.FirstOrDefault(e => e.Id == pendingDeleteId);
         await EventSvc.DeleteAsync(pendingDeleteId);
         await AuditSvc.LogAsync(currentUserId, "Событие удалено", "EventLog", (int?)pendingDeleteId,
             new { CaseId = deleted?.CaseId, Activity = deleted?.Activity }, null);
-        allEvents.RemoveAll(e => e.Id == pendingDeleteId);
         pendingDeleteId = 0;
-        ApplyFilter();
-    }
-
-    private void EnrichLocal(EventLog e)
-    {
-        if (e.ProductId.HasValue)  e.Product  = products.FirstOrDefault(p => p.Id == e.ProductId.Value);
-        if (e.ResourceId.HasValue) e.Resource = resources.FirstOrDefault(r => r.Id == e.ResourceId.Value);
+        await LoadPageAsync(currentPage);
     }
 
     private void ResetForm()

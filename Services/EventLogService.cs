@@ -8,6 +8,8 @@ namespace TechNormBlazor.Services;
 public interface IEventLogService
 {
     Task<List<EventLog>> GetAllAsync();
+    Task<(List<EventLog> Items, int Total)> GetPagedAsync(
+        int page, int pageSize, int? productId, string? source, string? search);
     Task<List<EventLog>> GetByCaseAsync(string caseId);
     Task<List<EventLog>> GetByProductAsync(int productId);
     Task<EventLog> CreateAsync(EventLog eventLog);
@@ -30,6 +32,32 @@ public class EventLogService(
             .Include(e => e.SourceDocument)
             .OrderByDescending(e => e.Timestamp)
             .ToListAsync();
+    }
+
+    public async Task<(List<EventLog> Items, int Total)> GetPagedAsync(
+        int page, int pageSize, int? productId, string? source, string? search)
+    {
+        using var db = await factory.CreateDbContextAsync();
+        var q = db.EventLogs.AsQueryable();
+
+        if (productId.HasValue && productId.Value > 0)
+            q = q.Where(e => e.ProductId == productId.Value);
+        if (!string.IsNullOrEmpty(source))
+            q = q.Where(e => e.Source == source);
+        if (!string.IsNullOrEmpty(search))
+            q = q.Where(e => e.Activity.Contains(search));
+
+        var total = await q.CountAsync();
+        var items = await q
+            .Include(e => e.Product)
+            .Include(e => e.Resource)
+            .Include(e => e.SourceDocument)
+            .OrderByDescending(e => e.Timestamp)
+            .Skip((page - 1) * pageSize)
+            .Take(pageSize)
+            .ToListAsync();
+
+        return (items, total);
     }
 
     public async Task<List<EventLog>> GetByCaseAsync(string caseId)

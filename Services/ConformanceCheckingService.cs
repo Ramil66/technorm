@@ -30,11 +30,39 @@ public class ConformanceCheckingService(
     private const decimal SeverityTimeHigh   = 20m;
     private const decimal SeverityTimeMedium = 10m;
 
-    private const decimal SeverityMatHigh   = 15m;
     private const decimal SeverityMatMedium = 10m;
 
     private const decimal ThresholdConformant  = 85m;
     private const decimal ThresholdNeedsReview = 70m;
+
+    // SQL result DTOs for aggregation queries
+    private sealed class SqlCountRow
+    {
+        public int case_count  { get; set; }
+        public int event_count { get; set; }
+    }
+
+    private sealed class SqlTransitionRow
+    {
+        public string from_act { get; set; } = "";
+        public string to_act   { get; set; } = "";
+        public int    cnt      { get; set; }
+    }
+
+    private sealed class SqlDurationRow
+    {
+        public string activity     { get; set; } = "";
+        public double avg_min      { get; set; }
+        public int    sample_count { get; set; }
+    }
+
+    private sealed class SqlResourceRow
+    {
+        public string activity      { get; set; } = "";
+        public int    resource_id   { get; set; }
+        public string resource_name { get; set; } = "";
+        public int    usage_count   { get; set; }
+    }
 
     public async Task TriggerRecalculationAsync(int productId, CancellationToken ct = default)
     {
@@ -94,34 +122,75 @@ public class ConformanceCheckingService(
             return null;
         }
 
-        var events = await db.EventLogs
-            .Where(e => e.ProductId == productId)
-            .Include(e => e.Resource)
-            .OrderBy(e => e.Timestamp)
-            .ToListAsync(ct);
+        // Count cases/events without loading any rows into memory
+        var countRow = (await db.Database.SqlQuery<SqlCountRow>(
+            $"""
+            SELECT COUNT(DISTINCT case_id)::int AS case_count,
+                   COUNT(*)::int                AS event_count
+            FROM event_logs
+            WHERE product_id = {productId}
+            """).ToListAsync(ct)).FirstOrDefault();
 
-        if (events.Count == 0)
+        if (countRow is null || countRow.event_count == 0)
         {
             logger.LogInformation(
                 "ConformanceCheck: no events for product {ProductId}", productId);
             return null;
         }
 
+        // Actual transitions via LEAD — covers ALL events in one pass
+        var transRows = await db.Database.SqlQuery<SqlTransitionRow>(
+            $"""
+            WITH ordered AS (
+                SELECT case_id, activity,
+                       LEAD(activity) OVER (PARTITION BY case_id ORDER BY timestamp) AS next_act
+                FROM event_logs
+                WHERE product_id = {productId}
+                  AND activity IS NOT NULL AND activity <> ''
+            )
+            SELECT activity AS from_act, next_act AS to_act, COUNT(*)::int AS cnt
+            FROM ordered
+            WHERE next_act IS NOT NULL AND activity <> next_act
+            GROUP BY activity, next_act
+            """).ToListAsync(ct);
+
+        // Average duration per activity across all events
+        var durRows = await db.Database.SqlQuery<SqlDurationRow>(
+            $"""
+            SELECT activity,
+                   AVG(EXTRACT(EPOCH FROM duration) / 60.0)::float8 AS avg_min,
+                   COUNT(*)::int                                      AS sample_count
+            FROM event_logs
+            WHERE product_id = {productId}
+              AND duration IS NOT NULL
+              AND activity IS NOT NULL AND activity <> ''
+            GROUP BY activity
+            """).ToListAsync(ct);
+
+        // Resource usage per (activity, resource) pair
+        var resRows = await db.Database.SqlQuery<SqlResourceRow>(
+            $"""
+            SELECT e.activity,
+                   e.resource_id::int                                  AS resource_id,
+                   COALESCE(r.name, 'Ресурс ' || e.resource_id::text) AS resource_name,
+                   COUNT(*)::int                                       AS usage_count
+            FROM event_logs e
+            LEFT JOIN resources r ON e.resource_id = r.id
+            WHERE e.product_id = {productId}
+              AND e.resource_id IS NOT NULL
+              AND e.activity IS NOT NULL AND e.activity <> ''
+            GROUP BY e.activity, e.resource_id, r.name
+            """).ToListAsync(ct);
+
         var orderedSteps = route.Steps.OrderBy(s => s.SequenceNum).ToList();
 
-        var traces = BuildActualTraces(events);
-
+        var actualTransitions   = transRows.ToDictionary(r => (r.from_act, r.to_act), r => r.cnt);
         var expectedTransitions = BuildExpectedTransitions(orderedSteps);
 
-        var actualTransitions = BuildActualTransitions(traces);
-
-        var transResult  = CheckTransitions(expectedTransitions, actualTransitions);
-
-        var timeResult   = CheckTimeNorms(orderedSteps, events);
-
-        var matResult    = CheckMaterialNorms(orderedSteps, events);
-
-        var resResult    = CheckResources(orderedSteps, events);
+        var transResult = CheckTransitions(expectedTransitions, actualTransitions);
+        var timeResult  = CheckTimeNormsFromAgg(orderedSteps, durRows);
+        var matResult   = new MaterialCheckResult(0m, false, []);
+        var resResult   = CheckResourcesFromAgg(orderedSteps, resRows);
 
         decimal pci = CalculatePci(
             transResult.RouteDeviation,
@@ -137,44 +206,36 @@ public class ConformanceCheckingService(
 
         var result = new ConformanceCheckResult
         {
-            ProductId                = productId,
-            RouteId                  = route.Id,
-            TotalTraceCount          = traces.Count,
-            CheckedTraceCount        = traces.Count,
-            TotalEventCount          = events.Count,
-            ExpectedTransitionCount  = transResult.ExpectedCount,
-            ActualTransitionCount    = transResult.ActualCount,
-            MatchedTransitionCount   = transResult.MatchedCount,
+            ProductId                 = productId,
+            RouteId                   = route.Id,
+            TotalTraceCount           = countRow.case_count,
+            CheckedTraceCount         = countRow.case_count,
+            TotalEventCount           = countRow.event_count,
+            ExpectedTransitionCount   = transResult.ExpectedCount,
+            ActualTransitionCount     = transResult.ActualCount,
+            MatchedTransitionCount    = transResult.MatchedCount,
             UnexpectedTransitionCount = transResult.UnexpectedCount,
-            MissingTransitionCount   = transResult.MissingCount,
-            TimeDeviationAvg         = timeResult.Avg,
-            MaterialDeviationAvg     = matResult.Avg,
-            RouteDeviation           = transResult.RouteDeviation,
-            ResourceDeviation        = resResult.Deviation,
-            ProcessConformanceIndex  = pci,
-            Status                   = status,
-            Summary                  = summary,
-            CalculatedAt             = DateTime.UtcNow,
-            Trigger                  = trigger,
-            OperationIssues          = timeResult.Issues,
-            TransitionIssues         = transResult.Issues,
-            MaterialIssues           = matResult.Issues,
-            ResourceIssues           = resResult.Issues,
+            MissingTransitionCount    = transResult.MissingCount,
+            TimeDeviationAvg          = timeResult.Avg,
+            MaterialDeviationAvg      = matResult.Avg,
+            RouteDeviation            = transResult.RouteDeviation,
+            ResourceDeviation         = resResult.Deviation,
+            ProcessConformanceIndex   = pci,
+            Status                    = status,
+            Summary                   = summary,
+            CalculatedAt              = DateTime.UtcNow,
+            Trigger                   = trigger,
+            OperationIssues           = timeResult.Issues,
+            TransitionIssues          = transResult.Issues,
+            MaterialIssues            = matResult.Issues,
+            ResourceIssues            = resResult.Issues,
         };
 
         await SaveConformanceMetricsAsync(db, result, ct);
-
         await UpdateRoutePciStatusAsync(db, route.Id, result, ct);
 
         return result;
     }
-
-    private static Dictionary<string, List<EventLog>> BuildActualTraces(List<EventLog> events)
-        => events
-            .GroupBy(e => e.CaseId)
-            .ToDictionary(
-                g => g.Key,
-                g => g.OrderBy(e => e.Timestamp).ToList());
 
     private static HashSet<(string From, string To)> BuildExpectedTransitions(
         List<RouteStep> steps)
@@ -190,25 +251,6 @@ public class ConformanceCheckingService(
         return result;
     }
 
-    private static Dictionary<(string From, string To), int> BuildActualTransitions(
-        Dictionary<string, List<EventLog>> traces)
-    {
-        var result = new Dictionary<(string, string), int>();
-        foreach (var trace in traces.Values)
-        {
-            var seq = trace.Select(e => e.Activity)
-                           .Where(a => !string.IsNullOrWhiteSpace(a))
-                           .ToList();
-            for (int i = 0; i < seq.Count - 1; i++)
-            {
-                if (seq[i] == seq[i + 1]) continue;
-                var key = (seq[i], seq[i + 1]);
-                result[key] = result.GetValueOrDefault(key) + 1;
-            }
-        }
-        return result;
-    }
-
     private record TransitionCheckResult(
         int ExpectedCount, int ActualCount, int MatchedCount,
         int UnexpectedCount, int MissingCount, decimal RouteDeviation,
@@ -216,7 +258,7 @@ public class ConformanceCheckingService(
 
     private static TransitionCheckResult CheckTransitions(
         HashSet<(string From, string To)> expected,
-        Dictionary<(string From, string To), int> actual)
+        Dictionary<(string, string), int> actual)
     {
         var issues = new List<TransitionConformanceIssue>();
 
@@ -230,7 +272,7 @@ public class ConformanceCheckingService(
 
         foreach (var (key, count) in actual)
         {
-            var normKey = (Norm(key.From), Norm(key.To));
+            var normKey = (Norm(key.Item1), Norm(key.Item2));
             if (normExpected.Contains(normKey))
             {
                 matched++;
@@ -241,12 +283,12 @@ public class ConformanceCheckingService(
                 unexpected++;
                 issues.Add(new TransitionConformanceIssue
                 {
-                    FromOperation = key.From,
-                    ToOperation   = key.To,
+                    FromOperation = key.Item1,
+                    ToOperation   = key.Item2,
                     ActualCount   = count,
                     ExistsInRoute = false,
                     Severity      = count <= 2 ? "Low" : "High",
-                    Message       = $"Переход «{key.From} → {key.To}» ({count}×) отсутствует в утверждённом маршруте.",
+                    Message       = $"Переход «{key.Item1} → {key.Item2}» ({count}×) отсутствует в утверждённом маршруте.",
                 });
             }
         }
@@ -265,8 +307,8 @@ public class ConformanceCheckingService(
             });
         }
 
-        int total      = Math.Max(expected.Count + actual.Count, 1);
-        decimal dev    = Math.Round((decimal)(unexpected + missing) / total * 100m, 2);
+        int total   = Math.Max(expected.Count + actual.Count, 1);
+        decimal dev = Math.Round((decimal)(unexpected + missing) / total * 100m, 2);
 
         return new TransitionCheckResult(
             expected.Count, actual.Count, matched,
@@ -275,14 +317,17 @@ public class ConformanceCheckingService(
 
     private record TimeCheckResult(decimal Avg, bool HasData, List<OperationConformanceIssue> Issues);
 
-    private static TimeCheckResult CheckTimeNorms(
+    private static TimeCheckResult CheckTimeNormsFromAgg(
         List<RouteStep> steps,
-        List<EventLog>  events)
+        List<SqlDurationRow> durRows)
     {
         var issues       = new List<OperationConformanceIssue>();
-        decimal weightedSum  = 0m;
-        int     totalSamples = 0;
-        bool    hasData      = false;
+        decimal wSum     = 0m;
+        int totalSamples = 0;
+        bool hasData     = false;
+
+        var byActivity = durRows.ToDictionary(
+            r => r.activity, r => r, StringComparer.OrdinalIgnoreCase);
 
         foreach (var step in steps)
         {
@@ -290,115 +335,40 @@ public class ConformanceCheckingService(
             decimal? norm = BestNorm(step);
             if (norm is null or 0) continue;
 
-            var durations = events
-                .Where(e => NamesMatch(e.Activity, opName) && e.Duration.HasValue)
-                .Select(e => (decimal)e.Duration!.Value.TotalMinutes)
-                .ToList();
-
-            if (durations.Count == 0) continue;
+            if (!byActivity.TryGetValue(opName, out var row) || row.sample_count == 0) continue;
 
             hasData = true;
-            decimal median = Median(durations);
-            decimal dev    = norm.Value > 0
-                ? Math.Round(Math.Abs(median - norm.Value) / norm.Value * 100m, 2)
+            decimal avg = (decimal)row.avg_min;
+            decimal dev = norm.Value > 0
+                ? Math.Round(Math.Abs(avg - norm.Value) / norm.Value * 100m, 2)
                 : 0m;
 
-            weightedSum  += dev * durations.Count;
-            totalSamples += durations.Count;
+            wSum         += dev * row.sample_count;
+            totalSamples += row.sample_count;
 
             if (dev >= SeverityTimeMedium)
                 issues.Add(new OperationConformanceIssue
                 {
-                    OperationName   = opName,
-                    NormTime        = norm,
-                    ActualTime      = Math.Round(median, 2),
+                    OperationName    = opName,
+                    NormTime         = norm,
+                    ActualTime       = Math.Round(avg, 2),
                     DeviationPercent = dev,
-                    Severity        = dev >= SeverityTimeHigh ? "High" : "Medium",
-                    Message         = $"Операция «{opName}»: факт {median:F1} мин, норма {norm:F1} мин, отклонение {dev:F1}%.",
+                    Severity         = dev >= SeverityTimeHigh ? "High" : "Medium",
+                    Message          = $"Операция «{opName}»: факт {avg:F1} мин, норма {norm:F1} мин, отклонение {dev:F1}%.",
                 });
         }
 
-        decimal avg = totalSamples > 0
-            ? Math.Round(weightedSum / totalSamples, 2)
-            : 0m;
-
-        return new TimeCheckResult(avg, hasData, issues);
+        decimal avgDev = totalSamples > 0 ? Math.Round(wSum / totalSamples, 2) : 0m;
+        return new TimeCheckResult(avgDev, hasData, issues);
     }
 
     private record MaterialCheckResult(decimal Avg, bool HasData, List<MaterialConformanceIssue> Issues);
 
-    private static MaterialCheckResult CheckMaterialNorms(
-        List<RouteStep> steps,
-        List<EventLog>  events)
-    {
-        var issues = new List<MaterialConformanceIssue>();
-
-        var factualMaterials = new Dictionary<string, List<decimal>>(StringComparer.OrdinalIgnoreCase);
-        foreach (var evt in events)
-        {
-            if (evt.Metadata is null) continue;
-            try
-            {
-                var root = evt.Metadata.RootElement;
-                if (!root.TryGetProperty("materials", out var matArray)) continue;
-                foreach (var item in matArray.EnumerateArray())
-                {
-                    string name = item.TryGetProperty("name", out var n) ? n.GetString() ?? "" : "";
-                    decimal qty = item.TryGetProperty("quantity", out var q) && q.TryGetDecimal(out var qd) ? qd : 0m;
-                    if (string.IsNullOrWhiteSpace(name) || qty <= 0) continue;
-                    factualMaterials.TryAdd(name, []);
-                    factualMaterials[name].Add(qty);
-                }
-            }
-            catch {  }
-        }
-
-        if (factualMaterials.Count == 0)
-            return new MaterialCheckResult(0m, false, issues);
-
-        decimal totalDev = 0m;
-        int     count    = 0;
-
-        foreach (var step in steps)
-        {
-            string opName = StepName(step);
-            foreach (var mn in step.MaterialNorms)
-            {
-                string matName = mn.Material?.Name ?? $"Материал {mn.MaterialId}";
-                decimal norm   = mn.ConsumptionRate;
-                if (norm <= 0) continue;
-
-                if (!factualMaterials.TryGetValue(matName, out var quantities)) continue;
-
-                decimal median = Median(quantities);
-                decimal dev    = Math.Round(Math.Abs(median - norm) / norm * 100m, 2);
-
-                totalDev += dev;
-                count++;
-
-                if (dev >= SeverityMatMedium)
-                    issues.Add(new MaterialConformanceIssue
-                    {
-                        MaterialName     = matName,
-                        OperationName    = opName,
-                        NormConsumption  = norm,
-                        ActualConsumption = Math.Round(median, 4),
-                        DeviationPercent = dev,
-                        Severity         = dev >= SeverityMatHigh ? "High" : "Medium",
-                        Message          = $"Материал «{matName}» ({opName}): факт {median:F3}, норма {norm:F3}, отклонение {dev:F1}%.",
-                    });
-            }
-        }
-
-        decimal avg = count > 0 ? Math.Round(totalDev / count, 2) : 0m;
-        return new MaterialCheckResult(avg, count > 0, issues);
-    }
-
     private record ResourceCheckResult(decimal Deviation, bool HasData, List<ResourceConformanceIssue> Issues);
 
-    private static ResourceCheckResult CheckResources(
+    private static ResourceCheckResult CheckResourcesFromAgg(
         List<RouteStep> steps,
-        List<EventLog>  events)
+        List<SqlResourceRow> resRows)
     {
         var issues = new List<ResourceConformanceIssue>();
 
@@ -420,44 +390,33 @@ public class ConformanceCheckingService(
         int totalUsages   = 0;
         int invalidUsages = 0;
 
-        var usageGroups = events
-            .Where(e => !string.IsNullOrWhiteSpace(e.Activity) && e.ResourceId.HasValue)
-            .GroupBy(e => (e.Activity, e.ResourceId!.Value));
-
-        foreach (var grp in usageGroups)
+        foreach (var row in resRows)
         {
-            string activity   = grp.Key.Activity;
-            int    resourceId = grp.Key.Value;
-            string resName    = grp.First().Resource?.Name ?? $"Ресурс {resourceId}";
-            int    cnt        = grp.Count();
+            if (!allowedResources.TryGetValue(row.activity, out var allowed)) continue;
 
-            bool opInRoute = allowedResources.TryGetValue(activity, out var allowed);
-            if (!opInRoute) continue;
+            totalUsages += row.usage_count;
 
-            totalUsages += cnt;
-
-            if (!allowed!.Contains(resourceId))
+            if (!allowed.Contains(row.resource_id))
             {
-                invalidUsages += cnt;
-                decimal share = Math.Round(cnt * 100m / Math.Max(cnt, 1), 2);
+                invalidUsages += row.usage_count;
+                decimal share = Math.Round(row.usage_count * 100m / Math.Max(row.usage_count, 1), 2);
                 issues.Add(new ResourceConformanceIssue
                 {
-                    OperationName    = activity,
-                    ResourceName     = resName,
+                    OperationName     = row.activity,
+                    ResourceName      = row.resource_name,
                     IsAllowedResource = false,
-                    UsageCount       = cnt,
-                    UsageShare       = share,
-                    Severity         = "High",
-                    Message          = $"Операция «{activity}»: ресурс «{resName}» не допустим согласно маршруту ({cnt}×).",
+                    UsageCount        = row.usage_count,
+                    UsageShare        = share,
+                    Severity          = "High",
+                    Message           = $"Операция «{row.activity}»: ресурс «{row.resource_name}» не допустим согласно маршруту ({row.usage_count}×).",
                 });
             }
         }
 
-        bool hasData    = totalUsages > 0;
-        decimal dev     = hasData
+        bool hasData = totalUsages > 0;
+        decimal dev  = hasData
             ? Math.Round((decimal)invalidUsages / totalUsages * 100m, 2)
             : 0m;
-
         return new ResourceCheckResult(dev, hasData, issues);
     }
 
@@ -470,9 +429,9 @@ public class ConformanceCheckingService(
         bool hasMaterialData,
         bool hasResourceData)
     {
-        decimal wTime = hasTimeData     ? WeightTime     : 0m;
-        decimal wMat  = hasMaterialData ? WeightMaterial : 0m;
-        decimal wRes  = hasResourceData ? WeightResource : 0m;
+        decimal wTime  = hasTimeData     ? WeightTime     : 0m;
+        decimal wMat   = hasMaterialData ? WeightMaterial : 0m;
+        decimal wRes   = hasResourceData ? WeightResource : 0m;
         decimal wRoute = WeightRoute;
 
         decimal totalWeight = wTime + wMat + wRoute + wRes;
@@ -496,26 +455,26 @@ public class ConformanceCheckingService(
     {
         var metricsObj = new
         {
-            type                     = "ConformanceChecking",
-            productId                = result.ProductId,
-            routeId                  = result.RouteId,
-            pci                      = result.ProcessConformanceIndex,
-            status                   = result.Status,
-            summary                  = result.Summary,
-            trigger                  = result.Trigger,
-            timeDeviationAvg         = result.TimeDeviationAvg,
-            materialDeviationAvg     = result.MaterialDeviationAvg,
-            routeDeviation           = result.RouteDeviation,
-            resourceDeviation        = result.ResourceDeviation,
-            totalTraceCount          = result.TotalTraceCount,
-            checkedTraceCount        = result.CheckedTraceCount,
-            totalEventCount          = result.TotalEventCount,
-            expectedTransitionCount  = result.ExpectedTransitionCount,
-            actualTransitionCount    = result.ActualTransitionCount,
-            matchedTransitionCount   = result.MatchedTransitionCount,
+            type                      = "ConformanceChecking",
+            productId                 = result.ProductId,
+            routeId                   = result.RouteId,
+            pci                       = result.ProcessConformanceIndex,
+            status                    = result.Status,
+            summary                   = result.Summary,
+            trigger                   = result.Trigger,
+            timeDeviationAvg          = result.TimeDeviationAvg,
+            materialDeviationAvg      = result.MaterialDeviationAvg,
+            routeDeviation            = result.RouteDeviation,
+            resourceDeviation         = result.ResourceDeviation,
+            totalTraceCount           = result.TotalTraceCount,
+            checkedTraceCount         = result.CheckedTraceCount,
+            totalEventCount           = result.TotalEventCount,
+            expectedTransitionCount   = result.ExpectedTransitionCount,
+            actualTransitionCount     = result.ActualTransitionCount,
+            matchedTransitionCount    = result.MatchedTransitionCount,
             unexpectedTransitionCount = result.UnexpectedTransitionCount,
-            missingTransitionCount   = result.MissingTransitionCount,
-            calculatedAt             = result.CalculatedAt,
+            missingTransitionCount    = result.MissingTransitionCount,
+            calculatedAt              = result.CalculatedAt,
             issues = new
             {
                 operations  = result.OperationIssues,
@@ -553,9 +512,6 @@ public class ConformanceCheckingService(
     private static string StepName(RouteStep step) =>
         step.Operation?.Name ?? step.Description ?? $"Шаг {step.SequenceNum}";
 
-    private static bool NamesMatch(string actual, string expected) =>
-        string.Equals(actual?.Trim(), expected?.Trim(), StringComparison.OrdinalIgnoreCase);
-
     private static string Norm(string s) => s?.Trim().ToLowerInvariant() ?? "";
 
     private static decimal? BestNorm(RouteStep step)
@@ -563,16 +519,6 @@ public class ConformanceCheckingService(
         var norms = step.TimeNorms.Where(t => t.NormValue > 0).Select(t => t.NormValue).ToList();
         if (norms.Count == 0) return null;
         return norms.Average();
-    }
-
-    private static decimal Median(List<decimal> values)
-    {
-        if (values.Count == 0) return 0m;
-        var sorted = values.OrderBy(v => v).ToList();
-        int mid    = sorted.Count / 2;
-        return sorted.Count % 2 == 0
-            ? (sorted[mid - 1] + sorted[mid]) / 2m
-            : sorted[mid];
     }
 
     private static string GetStatus(decimal pci) => pci switch

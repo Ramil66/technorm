@@ -12,6 +12,7 @@
 @inject IRouteBuilderService RouteBuildSvc
 @inject IAuditLogService AuditSvc
 @inject IAnalyticsService AnalyticsSvc
+@inject IConformanceCheckingService ConformanceSvc
 @inject IJSRuntime JS
 @using System.Text.Json
 @using TechNormBlazor.Services.Analytics
@@ -81,7 +82,14 @@
                         <strong>@productRoutes.Count</strong> МК
                     </span>
                 }
-                @if (routeProductId > 0 && productRoutes.FirstOrDefault(r => r.Status == "published") is { LastPci: not null } pciRoute)
+                @if (isPciCalculating)
+                {
+                    <span style="font-size:12px;color:#94a3b8;display:flex;align-items:center;gap:4px;">
+                        <span class="spinner-border spinner-border-sm" style="width:12px;height:12px;border-width:2px;"></span>
+                        PCI считается...
+                    </span>
+                }
+                else if (routeProductId > 0 && productRoutes.FirstOrDefault(r => r.Status == "published") is { LastPci: not null } pciRoute)
                 {
                     <span style="font-size:12px;font-weight:600;color:@PciColor(pciRoute.LastPciStatus);"
                           title="@PciTooltip(pciRoute)">
@@ -1331,6 +1339,7 @@
     private string SelectedProductName => selectedProduct?.Name ?? "— выберите изделие —";
 
     private int             routeProductId   = 0;
+    private bool            isPciCalculating = false;
     private List<TechRoute> productRoutes    = [];
     private HashSet<int>    expandedRouteIds   = [];
     private HashSet<int>    loadingRouteIds    = [];
@@ -1527,13 +1536,6 @@
         if (routeProductId == 0) { productRoutes = []; return; }
         productRoutes = await RouteSvc.GetByProductAsync(routeProductId);
 
-        if (!productMinerCache.ContainsKey(routeProductId) &&
-            productRoutes.Any(r => r.SourceEventCount.HasValue))
-        {
-            var mr = await RouteBuildSvc.MineFromEventsAsync(routeProductId);
-            if (mr.Success) productMinerCache[routeProductId] = mr;
-        }
-
         var mainRoute = productRoutes.FirstOrDefault(r => r.Status == "published");
         if (mainRoute is not null)
         {
@@ -1541,6 +1543,26 @@
             mainRouteSteps                    = full?.Steps.OrderBy(s => s.SequenceNum).ToList() ?? [];
             routeStepsCache[mainRoute.Id]     = mainRouteSteps;
             routeMetricsCache[mainRoute.Id]   = ComputeMetrics(mainRouteSteps);
+
+            // Запускаем пересчёт PCI в фоне при каждом переходе на изделие
+            _ = RecalculatePciInBackgroundAsync(routeProductId);
+        }
+    }
+
+    private async Task RecalculatePciInBackgroundAsync(int productId)
+    {
+        isPciCalculating = true;
+        await InvokeAsync(StateHasChanged);
+        try
+        {
+            await ConformanceSvc.TriggerRecalculationAsync(productId);
+            productRoutes = await RouteSvc.GetByProductAsync(productId);
+        }
+        catch { /* не прерываем UI при ошибке PCI */ }
+        finally
+        {
+            isPciCalculating = false;
+            await InvokeAsync(StateHasChanged);
         }
     }
 

@@ -55,5 +55,26 @@ window.tnInterop = {
         a.click();
         document.body.removeChild(a);
         URL.revokeObjectURL(url);
+    },
+
+    setupInfiniteScroll: function (dotnetRef, sentinelId) {
+        if (window._tnInfiniteObserver) {
+            window._tnInfiniteObserver.disconnect();
+        }
+        const sentinel = document.getElementById(sentinelId);
+        if (!sentinel) return;
+        window._tnInfiniteObserver = new IntersectionObserver(function (entries) {
+            if (entries[0].isIntersecting) {
+                dotnetRef.invokeMethodAsync('OnScrolledToBottom');
+            }
+        }, { rootMargin: '400px' });
+        window._tnInfiniteObserver.observe(sentinel);
+    },
+
+    disposeInfiniteScroll: function () {
+        if (window._tnInfiniteObserver) {
+            window._tnInfiniteObserver.disconnect();
+            window._tnInfiniteObserver = null;
+        }
     }
 };
