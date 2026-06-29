@@ -13,6 +13,13 @@
 
 <PageTitle>Журнал событий — ТехНорм</PageTitle>
 
+@if (errorMessage is not null)
+{
+    <div class="alert alert-danger d-flex align-items-center gap-2 mb-3" style="font-size:13px;">
+        <i class="fa-solid fa-circle-exclamation"></i>@errorMessage
+    </div>
+}
+
 <div class="page-header">
     <h1><i class="fa-solid fa-bolt" style="color:var(--tn-blue);margin-right:10px;font-size:18px;"></i>Журнал событий</h1>
     <span class="text-muted" style="font-size:13px;">
@@ -211,6 +218,23 @@
                         </tr>
                     </thead>
                     <tbody>
+                        @if (isLoading && !pagedItems.Any())
+                        {
+                            @for (int i = 0; i < 10; i++)
+                            {
+                                <tr>
+                                    <td><div class="tn-skel" style="height:13px;width:72px;"></div></td>
+                                    <td><div class="tn-skel" style="height:13px;width:130px;"></div></td>
+                                    <td><div class="tn-skel" style="height:13px;width:90px;"></div></td>
+                                    <td><div class="tn-skel" style="height:13px;width:80px;"></div></td>
+                                    <td><div class="tn-skel" style="height:13px;width:110px;"></div></td>
+                                    <td><div class="tn-skel" style="height:13px;width:32px;"></div></td>
+                                    <td><div class="tn-skel" style="height:13px;width:28px;"></div></td>
+                                    <td><div class="tn-skel" style="height:18px;width:64px;border-radius:10px;"></div></td>
+                                    <td></td>
+                                </tr>
+                            }
+                        }
                         @foreach (var e in pagedItems)
                         {
                             <tr>
@@ -392,6 +416,7 @@
     private bool            isLoading      = false;
     private bool            isLoadingMore  = false;
     private bool            hasMore        = false;
+    private string?         errorMessage;
     private int             _lastRenderedCount = -1;
     private DotNetObjectReference<Events>? _dotnetRef;
 
@@ -436,18 +461,26 @@
 
     protected override async Task OnInitializedAsync()
     {
-        var state = await AuthStateTask;
-        currentUserId = int.Parse(state.User.FindFirst("UserId")?.Value ?? "0");
+        try
+        {
+            var state = await AuthStateTask;
+            currentUserId = int.Parse(state.User.FindFirst("UserId")?.Value ?? "0");
 
-        var t2 = ProductSvc.GetAllAsync();
-        var t3 = OperationSvc.GetAllAsync();
-        var t4 = ResourceSvc.GetAllAsync();
-        await Task.WhenAll(t2, t3, t4);
+            var t2 = ProductSvc.GetAllAsync();
+            var t3 = OperationSvc.GetAllAsync();
+            var t4 = ResourceSvc.GetAllAsync();
+            await Task.WhenAll(t2, t3, t4);
 
-        products   = t2.Result;
-        operations = t3.Result;
-        resources  = t4.Result;
-        await LoadPageAsync(1);
+            products   = t2.Result;
+            operations = t3.Result;
+            resources  = t4.Result;
+            await LoadPageAsync(1);
+        }
+        catch (Exception ex)
+        {
+            errorMessage = $"Ошибка загрузки данных: {ex.Message}";
+            isLoading = false;
+        }
     }
 
     private async Task LoadPageAsync(int page)

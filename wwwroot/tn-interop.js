@@ -76,5 +76,56 @@ window.tnInterop = {
             window._tnInfiniteObserver.disconnect();
             window._tnInfiniteObserver = null;
         }
+    },
+
+    showNavProgress: function () {
+        const bar = document.getElementById('tn-nav-progress');
+        if (!bar) return;
+        clearTimeout(window._tnNavTimer);
+        bar.style.transition = 'none';
+        bar.style.width = '0';
+        bar.style.opacity = '1';
+        requestAnimationFrame(function () {
+            bar.style.transition = 'width 0.4s ease';
+            bar.style.width = '50%';
+            window._tnNavTimer = setTimeout(function () {
+                if (bar.style.opacity === '1') {
+                    bar.style.transition = 'width 0.8s ease';
+                    bar.style.width = '82%';
+                }
+            }, 450);
+        });
+    },
+
+    hideNavProgress: function () {
+        const bar = document.getElementById('tn-nav-progress');
+        if (!bar || bar.style.opacity !== '1') return;
+        clearTimeout(window._tnNavTimer);
+        bar.style.transition = 'width 0.12s ease';
+        bar.style.width = '100%';
+        setTimeout(function () {
+            bar.style.transition = 'opacity 0.22s ease';
+            bar.style.opacity = '0';
+            setTimeout(function () { bar.style.width = '0'; }, 230);
+        }, 120);
     }
 };
+
+(function () {
+    // Мгновенный отклик: показываем прогресс-бар при клике на внутренние ссылки
+    document.addEventListener('click', function (e) {
+        const a = e.target.closest('a[href]');
+        if (!a || a.target === '_blank' || a.hasAttribute('download')) return;
+        const href = a.getAttribute('href') || '';
+        if (!href || href.startsWith('http') || href.startsWith('//') || href.startsWith('#') || href.startsWith('mailto:')) return;
+        if (href === '/logout' || href.startsWith('/account/')) return;
+        window.tnInterop.showNavProgress();
+    }, true);
+
+    // Скрываем когда Blazor меняет URL (навигация завершилась)
+    const _origPush = history.pushState.bind(history);
+    history.pushState = function (state, title, url) {
+        _origPush(state, title, url);
+        setTimeout(function () { window.tnInterop.hideNavProgress(); }, 60);
+    };
+})();

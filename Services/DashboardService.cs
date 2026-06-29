@@ -34,10 +34,11 @@ public class DashboardService(IDbContextFactory<TechNormDbContext> factory) : ID
     public async Task<DashboardStats> GetStatsAsync()
     {
         using var db = await factory.CreateDbContextAsync();
-        var today = DateTime.UtcNow.Date;
+        var todayStart = DateTime.UtcNow.Date;
+        var todayEnd   = todayStart.AddDays(1);
 
         var totalEvents    = await db.EventLogs.CountAsync();
-        var todayEvents    = await db.EventLogs.CountAsync(e => e.Timestamp.Date == today);
+        var todayEvents    = await db.EventLogs.CountAsync(e => e.Timestamp >= todayStart && e.Timestamp < todayEnd);
         var activeRoutes   = await db.TechRoutes.CountAsync(r => r.Status == "published");
         var productsInWork = await db.TechRoutes
             .Where(r => r.Status == "published")
@@ -52,12 +53,22 @@ public class DashboardService(IDbContextFactory<TechNormDbContext> factory) : ID
     public async Task<int[]> GetWeeklyCountsAsync()
     {
         using var db = await factory.CreateDbContextAsync();
-        var today  = DateTime.UtcNow.Date;
+        var today     = DateTime.UtcNow.Date;
+        var weekStart = today.AddDays(-6);
+        var weekEnd   = today.AddDays(1);
+
+        var rows = await db.EventLogs
+            .Where(e => e.Timestamp >= weekStart && e.Timestamp < weekEnd)
+            .GroupBy(e => e.Timestamp.Date)
+            .Select(g => new { Date = g.Key, Count = g.Count() })
+            .ToListAsync();
+
         var counts = new int[7];
-        for (int i = 6; i >= 0; i--)
+        foreach (var row in rows)
         {
-            var day = today.AddDays(-i);
-            counts[6 - i] = await db.EventLogs.CountAsync(e => e.Timestamp.Date == day);
+            var idx = (int)(row.Date - weekStart).TotalDays;
+            if (idx >= 0 && idx < 7)
+                counts[idx] = row.Count;
         }
         return counts;
     }

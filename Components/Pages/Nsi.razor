@@ -1192,16 +1192,29 @@
     </div>
 }
 
-@if (lastMinerResult is not null && showMinerConfirm)
+@if (showMinerConfirm)
 {
     <div class="tn-backdrop" @onclick="CancelMiner">
         <div class="tn-modal" @onclick:stopPropagation style="max-width:580px;">
             <div class="tn-modal-header">
                 <h5>
                     <i class="fa-solid fa-wand-magic-sparkles me-2" style="color:var(--tn-blue);"></i>
-                    Inductive Miner — результат анализа событий
+                    Результат анализа журнала событий
                 </h5>
             </div>
+
+            @if (isMining)
+            {
+                <div style="display:flex;flex-direction:column;align-items:center;justify-content:center;padding:48px 24px;gap:16px;">
+                    <div class="spinner-border text-primary" style="width:2.5rem;height:2.5rem;" role="status"></div>
+                    <div style="font-size:14px;color:var(--tn-text-muted);font-weight:500;">Идет обработка событий...</div>
+                </div>
+                <div class="tn-modal-footer">
+                    <button class="btn btn-secondary" @onclick="CancelMiner">Отмена</button>
+                </div>
+            }
+            else if (lastMinerResult is not null)
+            {
             <div class="row g-2 mb-3">
                 <div class="col-3"><div class="stat-mini"><div class="stat-mini-val">@lastMinerResult.TotalCases</div><div class="stat-mini-lbl">трасс (дел)</div></div></div>
                 <div class="col-3"><div class="stat-mini"><div class="stat-mini-val">@lastMinerResult.TotalEvents</div><div class="stat-mini-lbl">событий</div></div></div>
@@ -1297,12 +1310,11 @@
                     </tbody>
                 </table>
             </div>
-            @{ var variantCount = GetVariantCount(); }
-            @if (variantCount > 1)
+            @if (GetVariantCount() > 1)
             {
                 <div class="alert alert-info py-2 mb-3" style="font-size:12px;">
                     <i class="fa-solid fa-code-branch me-1"></i>
-                    Обнаружено <strong>@variantCount</strong> параллельных варианта — будет создано по маршруту для каждого.
+                    Обнаружено <strong>@GetVariantCount()</strong> параллельных варианта — будет создано по маршруту для каждого.
                 </div>
             }
             <div class="mb-1">
@@ -1321,9 +1333,10 @@
                 <button class="btn btn-primary" @onclick="ConfirmBuildRoute" disabled="@(isSavingRoute || routeNameConflict)">
                     @if (isSavingRoute) { <span class="spinner-border spinner-border-sm me-1" role="status"></span> }
                     <i class="fa-solid fa-floppy-disk me-1"></i>
-                    Создать @(variantCount > 1 ? $"{variantCount} маршрута" : "маршрут") (@lastMinerResult.Activities.Count оп.)
+                    Создать @(GetVariantCount() > 1 ? $"{GetVariantCount()} маршрута" : "маршрут") (@lastMinerResult.Activities.Count оп.)
                 </button>
             </div>
+            }
         </div>
     </div>
 }
@@ -1721,25 +1734,30 @@
     private async Task AutoBuildRoute()
     {
         if (routeProductId == 0) return;
-        minerError = null;
-        isMining   = true;
+        minerError       = null;
+        lastMinerResult  = null;
+        isMining         = true;
+        showMinerConfirm = true;
         StateHasChanged();
         try
         {
             lastMinerResult = await RouteBuildSvc.MineFromEventsAsync(routeProductId);
             if (!lastMinerResult.Success)
             {
-                minerError      = lastMinerResult.ErrorMessage;
-                lastMinerResult = null;
+                minerError       = lastMinerResult.ErrorMessage;
+                lastMinerResult  = null;
+                showMinerConfirm = false;
                 return;
             }
-            var product      = allProducts.FirstOrDefault(p => p.Id == routeProductId);
+            var product       = allProducts.FirstOrDefault(p => p.Id == routeProductId);
             newRouteName      = $"МК — {product?.Name} (авто)";
             routeNameConflict = false;
             CheckRouteName();
-            showMinerConfirm  = true;
         }
-        finally { isMining = false; }
+        finally
+        {
+            isMining = false;
+        }
     }
 
     private async Task ConfirmBuildRoute()
@@ -1790,7 +1808,7 @@
     private int GetVariantCount() =>
         lastMinerResult?.Stages.Aggregate(1, (acc, s) => acc * s.Count) ?? 1;
 
-    private void CancelMiner() { showMinerConfirm = false; lastMinerResult = null; }
+    private void CancelMiner() { showMinerConfirm = false; lastMinerResult = null; isMining = false; }
 
     private void PrepareAddStep(TechRoute route)
     {

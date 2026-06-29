@@ -7,6 +7,13 @@
 
 <PageTitle>Пользователи — ТехНорм</PageTitle>
 
+@if (pageError is not null)
+{
+    <div class="alert alert-danger d-flex align-items-center gap-2 mb-3" style="font-size:13px;">
+        <i class="fa-solid fa-circle-exclamation"></i>@pageError
+    </div>
+}
+
 <div class="page-header">
     <h1><i class="fa-solid fa-users" style="color:var(--tn-blue);margin-right:10px;font-size:18px;"></i>Пользователи</h1>
     <button class="btn btn-primary btn-sm" @onclick="ShowAddModal">
@@ -196,6 +203,7 @@
     [CascadingParameter] private Task<AuthenticationState> AuthStateTask { get; set; } = default!;
 
     private int     currentUserId;
+    private string? pageError;
     private List<User>  allUsers      = [];
     private List<User>  filteredUsers = [];
     private string searchQuery = "";
@@ -219,10 +227,17 @@
 
     protected override async Task OnInitializedAsync()
     {
-        var auth = await AuthStateTask;
-        currentUserId = int.Parse(auth.User.FindFirst("UserId")?.Value ?? "0");
-        allUsers = await UserSvc.GetAllAsync();
-        FilterUsers();
+        try
+        {
+            var auth = await AuthStateTask;
+            currentUserId = int.Parse(auth.User.FindFirst("UserId")?.Value ?? "0");
+            allUsers = await UserSvc.GetAllAsync();
+            FilterUsers();
+        }
+        catch (Exception ex)
+        {
+            pageError = $"Ошибка загрузки пользователей: {ex.Message}";
+        }
     }
 
     private void FilterUsers()

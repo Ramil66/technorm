@@ -11,6 +11,13 @@
 
 <PageTitle>Справочники — ТехНорм</PageTitle>
 
+@if (pageError is not null)
+{
+    <div class="alert alert-danger d-flex align-items-center gap-2 mb-3" style="font-size:13px;">
+        <i class="fa-solid fa-circle-exclamation"></i>@pageError
+    </div>
+}
+
 <div class="page-header">
     <h1><i class="fa-solid fa-book" style="color:var(--tn-blue);margin-right:10px;font-size:18px;"></i>Справочники</h1>
     @if (activeTab != 3)
@@ -447,6 +454,7 @@
     private bool   showModal  = false;
     private bool   isEditing  = false;
     private string? modalError;
+    private string? pageError;
 
     private List<Operation>            operations = [];
     private List<Resource>             resources  = [];
@@ -493,9 +501,16 @@
 
     protected override async Task OnInitializedAsync()
     {
-        var auth = await AuthStateTask;
-        currentUserId = int.Parse(auth.User.FindFirst("UserId")?.Value ?? "0");
-        operations = await OpSvc.GetAllAsync();
+        try
+        {
+            var auth = await AuthStateTask;
+            currentUserId = int.Parse(auth.User.FindFirst("UserId")?.Value ?? "0");
+            operations = await OpSvc.GetAllAsync();
+        }
+        catch (Exception ex)
+        {
+            pageError = $"Ошибка загрузки справочников: {ex.Message}";
+        }
     }
 
     private async Task SetTab(int tab)

@@ -21,7 +21,7 @@ public interface IUserService
 public class UserService(IDbContextFactory<TechNormDbContext> factory) : IUserService
 {
     private static string HashPassword(string password) =>
-        BCrypt.Net.BCrypt.HashPassword(password, workFactor: 12);
+        BCrypt.Net.BCrypt.HashPassword(password, workFactor: 10);
 
     public async Task<List<User>> GetAllAsync()
     {

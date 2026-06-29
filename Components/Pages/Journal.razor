@@ -7,6 +7,13 @@
 
 <PageTitle>История — ТехНорм</PageTitle>
 
+@if (errorMessage is not null)
+{
+    <div class="alert alert-danger d-flex align-items-center gap-2 mb-3" style="font-size:13px;">
+        <i class="fa-solid fa-circle-exclamation"></i>@errorMessage
+    </div>
+}
+
 <div class="page-header">
     <h1><i class="fa-solid fa-clock-rotate-left" style="color:var(--tn-blue);margin-right:10px;font-size:18px;"></i>История действий</h1>
     <span class="text-muted" style="font-size:13px;">@filteredLogs.Count из @allLogs.Count записей</span>
@@ -107,6 +114,7 @@
 
     private bool                        isAdmin      = false;
     private int                         currentUserId;
+    private string?                     errorMessage;
     private List<AuditLog>              allLogs      = [];
     private List<AuditLog>              filteredLogs = [];
     private string                      filterSearch   = "";
@@ -117,23 +125,30 @@
 
     protected override async Task OnInitializedAsync()
     {
-        var state = await AuthStateTask;
-        isAdmin       = state.User.IsInRole("admin");
-        currentUserId = int.Parse(state.User.FindFirst("UserId")?.Value ?? "0");
-
-        var raw = await AuditSvc.GetRecentAsync(500);
-        allLogs = isAdmin ? raw : raw.Where(l => l.UserId == currentUserId).ToList();
-
-        if (isAdmin)
+        try
         {
-            filterUsers = allLogs
-                .Where(l => l.User is not null && l.UserId.HasValue)
-                .Select(l => (l.UserId!.Value, l.User!.FullName))
-                .DistinctBy(u => u.Item1)
-                .OrderBy(u => u.Item2)
-                .ToList();
+            var state = await AuthStateTask;
+            isAdmin       = state.User.IsInRole("admin");
+            currentUserId = int.Parse(state.User.FindFirst("UserId")?.Value ?? "0");
+
+            var raw = await AuditSvc.GetRecentAsync(500);
+            allLogs = isAdmin ? raw : raw.Where(l => l.UserId == currentUserId).ToList();
+
+            if (isAdmin)
+            {
+                filterUsers = allLogs
+                    .Where(l => l.User is not null && l.UserId.HasValue)
+                    .Select(l => (l.UserId!.Value, l.User!.FullName))
+                    .DistinctBy(u => u.Item1)
+                    .OrderBy(u => u.Item2)
+                    .ToList();
+            }
+            ApplyFilter();
         }
-        ApplyFilter();
+        catch (Exception ex)
+        {
+            errorMessage = $"Ошибка загрузки истории: {ex.Message}";
+        }
     }
 
     private void ApplyFilter()

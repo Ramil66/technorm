@@ -68,9 +68,8 @@ if (!app.Environment.IsDevelopment())
 {
     app.UseExceptionHandler("/Error", createScopeForErrors: true);
     app.UseHsts();
+    app.UseHttpsRedirection();
 }
-
-app.UseHttpsRedirection();
 app.UseAuthentication();
 app.UseAuthorization();
 app.UseAntiforgery();
@@ -90,7 +89,7 @@ app.MapPost("/account/login", async (HttpContext ctx, IAuthService authService) 
     return result.Success
         ? Results.Redirect("/")
         : Results.Redirect("/login?error=" + Uri.EscapeDataString(result.Error ?? "Неверный логин или пароль"));
-});
+}).DisableAntiforgery();
 
 app.MapGet("/api/files/{id:int}", async (int id, HttpContext ctx, IDocumentService docSvc) =>
 {
@@ -212,7 +211,7 @@ static async Task SeedDatabase(WebApplication app)
         new User
         {
             Username     = "admin",
-            PasswordHash = BCrypt.Net.BCrypt.HashPassword("admin123", workFactor: 12),
+            PasswordHash = BCrypt.Net.BCrypt.HashPassword("admin123", workFactor: 10),
             FullName     = "Администратор системы",
             Email        = "admin@technorm.local",
             Role         = "admin",
@@ -222,7 +221,7 @@ static async Task SeedDatabase(WebApplication app)
         new User
         {
             Username     = "technolog",
-            PasswordHash = BCrypt.Net.BCrypt.HashPassword("tech123", workFactor: 12),
+            PasswordHash = BCrypt.Net.BCrypt.HashPassword("tech123", workFactor: 10),
             FullName     = "Технолог-нормировщик",
             Email        = "technolog@technorm.local",
             Role         = "technologist",
