@@ -817,6 +817,19 @@ a.kpi-card:hover {
     gap: 5px;
 }
 
+/* ── Save order bar ── */
+.mk-steps-savebar {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    padding: 8px 16px;
+    background: #fffbeb;
+    border-top: 1px solid #fde68a;
+    font-size: 12.5px;
+    color: #92400e;
+}
+
 /* ── Horizontal step flow ── */
 .mk-steps-flow {
     display: flex;
@@ -826,30 +839,45 @@ a.kpi-card:hover {
     gap: 0;
     min-height: 220px;
     scroll-behavior: smooth;
-}
-
-.mk-step-arrow {
-    flex: 0 0 34px;
-    display: flex;
-    align-items: center;
     justify-content: center;
-    padding-top: 34px;
-    color: #94a3b8;
-    font-size: 13px;
-    flex-shrink: 0;
+    justify-content: safe center;
+    background-color: #fafbfc;
+    background-image: radial-gradient(circle, #e2e8f0 1px, transparent 1px);
+    background-size: 14px 14px;
 }
 
 /* ── Step card ── */
+/* Соединительная линия рисуется как ::before у самой карточки (не отдельным
+   div'ом) — так она "принадлежит" карточке и всегда остаётся на своём месте
+   относительно соседей, даже когда карточки физически переставляются в DOM
+   при перетаскивании (см. tnInterop.routeDrag в tn-interop.js). */
 .mk-step-card {
+    position: relative;
     flex: 0 0 175px;
     min-height: 130px;
-    background: #fff;
+    background-color: #fff;
     border: 1.5px solid #e2e8f0;
     border-radius: 12px;
     padding: 12px;
     cursor: pointer;
-    transition: border-color .15s, box-shadow .15s;
+    transition: border-color .15s, box-shadow .15s, transform .15s;
     flex-shrink: 0;
+}
+
+.mk-step-card + .mk-step-card {
+    margin-left: 34px;
+}
+
+.mk-step-card + .mk-step-card::before {
+    content: '';
+    position: absolute;
+    left: -34px;
+    top: 34px;
+    width: 34px;
+    height: 2px;
+    background: #cbd5e1;
+    border-radius: 1px;
+    pointer-events: none;
 }
 
 .mk-step-card:hover {
@@ -859,8 +887,25 @@ a.kpi-card:hover {
 
 .mk-step-card.selected {
     border-color: #2563eb;
-    background: #eff6ff;
+    background-color: #eff6ff;
     box-shadow: 0 2px 12px rgba(37,99,235,.15);
+}
+
+.mk-step-card[draggable="true"] {
+    cursor: grab;
+}
+
+.mk-step-card[draggable="true"]:active {
+    cursor: grabbing;
+}
+
+.mk-step-card.dragging {
+    opacity: .5;
+    box-shadow: 0 6px 16px rgba(0,0,0,.15);
+}
+
+.mk-step-card.dragging::before {
+    display: none;
 }
 
 .mk-step-num {
@@ -1074,6 +1119,27 @@ a.kpi-card:hover {
     display: flex;
     align-items: center;
     gap: 6px;
+}
+
+/* ── PCI dynamics chart ── */
+.mk-pci-chart-wrap {
+    position: relative;
+}
+
+.mk-pci-tooltip {
+    display: none;
+    position: absolute;
+    pointer-events: none;
+    background: #1e293b;
+    color: #fff;
+    font-size: 11px;
+    font-weight: 600;
+    padding: 4px 9px;
+    border-radius: 6px;
+    white-space: nowrap;
+    transform: translateY(-100%);
+    z-index: 5;
+    box-shadow: 0 2px 8px rgba(0,0,0,.2);
 }
 
 /* Skeleton loading */

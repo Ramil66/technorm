@@ -23,13 +23,13 @@
 <div class="card mb-3">
     <div class="card-body py-2">
         <div class="row g-2">
-            <div class="col-md-4">
+            <div class="col-12 col-md" style="flex:2 1 240px;">
                 <input class="form-control form-control-sm" placeholder="Поиск по действию..."
                        @bind="filterSearch" @bind:after="ApplyFilter" />
             </div>
             @if (isAdmin)
             {
-                <div class="col-md-3">
+                <div class="col-12 col-md" style="flex:1.5 1 160px;">
                     <select class="form-select form-select-sm" @bind="filterUserId" @bind:after="ApplyFilter">
                         <option value="0">Все пользователи</option>
                         @foreach (var u in filterUsers)
@@ -39,11 +39,11 @@
                     </select>
                 </div>
             }
-            <div class="col-md-2">
+            <div class="col-6 col-md" style="flex:1 1 140px;">
                 <input type="date" class="form-control form-control-sm" title="С даты"
                        @bind="filterDateFrom" @bind:after="ApplyFilter" />
             </div>
-            <div class="col-md-2">
+            <div class="col-6 col-md" style="flex:1 1 140px;">
                 <input type="date" class="form-control form-control-sm" title="По дату"
                        @bind="filterDateTo" @bind:after="ApplyFilter" />
             </div>

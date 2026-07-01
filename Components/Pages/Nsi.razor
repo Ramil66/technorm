@@ -451,17 +451,11 @@
                                 }
                             }
 
-                            <div class="mk-steps-flow">
-                                @{ int stepIdx = 0; }
+                            <div class="mk-steps-flow" id="steps-flow-@route.Id"
+                                 ondragover="event.preventDefault(); tnInterop.routeDrag.over('steps-flow-@route.Id', event.clientX);"
+                                 @ondrop="() => OnStepsDropped(route.Id)">
                                 @foreach (var step in routeSteps.OrderBy(s => s.SequenceNum).ThenBy(s => s.Id))
                                 {
-                                    @if (stepIdx > 0)
-                                    {
-                                        <div class="mk-step-arrow">
-                                            <i class="fa-solid fa-arrow-right"></i>
-                                        </div>
-                                    }
-                                    stepIdx++;
                                     var sel     = selectedStep?.Id == step.Id;
                                     var diff    = !isMain ? GetStepDiff(step) : DiffLevel.None;
                                     var diffCss = diff == DiffLevel.FullDiff  ? "diff"
@@ -469,12 +463,43 @@
                                                 : "";
                                     var sName   = step.Operation?.Name ?? step.Description ?? "—";
                                     var tot     = step.TimeNorms.Sum(tn => tn.NormValue);
-                                    <div class="mk-step-card @(sel ? "selected" : "") @diffCss"
+                                    var cardCss = (sel ? "selected " : "") + diffCss;
+                                    <div class="mk-step-card @cardCss"
+                                         @key="step.Id"
+                                         data-step-id="@step.Id"
+                                         draggable="@(isTechnologist ? "true" : "false")"
+                                         ondragstart="tnInterop.routeDrag.start(this, 'steps-flow-@route.Id');"
+                                         ondragend="tnInterop.routeDrag.end();"
                                          @onclick="() => SelectStep(step, route.Id)">
                                         @StepCardInner(step, sName, tot, sel, route.Id, diff)
                                     </div>
                                 }
                             </div>
+
+                            @if (isTechnologist && dirtyRouteIds.Contains(route.Id))
+                            {
+                                <div class="mk-steps-savebar">
+                                    <span><i class="fa-solid fa-triangle-exclamation"></i> Порядок шагов изменён и не сохранён</span>
+                                    <div style="display:flex;gap:8px;">
+                                        <button class="btn btn-sm btn-outline-secondary" disabled="@savingRouteIds.Contains(route.Id)"
+                                                @onclick="() => CancelStepsOrder(route.Id)">
+                                            <i class="fa-solid fa-rotate-left me-1"></i>Отменить
+                                        </button>
+                                        <button class="btn btn-sm btn-primary" disabled="@savingRouteIds.Contains(route.Id)"
+                                                @onclick="() => SaveStepsOrder(route.Id)">
+                                            @if (savingRouteIds.Contains(route.Id))
+                                            {
+                                                <span class="spinner-border spinner-border-sm me-1"></span>
+                                            }
+                                            else
+                                            {
+                                                <i class="fa-solid fa-floppy-disk me-1"></i>
+                                            }
+                                            Сохранить порядок
+                                        </button>
+                                    </div>
+                                </div>
+                            }
                         }
                     }
                 </div>
@@ -1344,7 +1369,8 @@
 @code {
     [CascadingParameter] private Task<AuthenticationState> AuthStateTask { get; set; } = default!;
 
-    private int currentUserId;
+    private int  currentUserId;
+    private bool isTechnologist;
 
     private List<Product> allProducts     = [];
     private Product?      selectedProduct;
@@ -1363,6 +1389,8 @@
     private TechRoute?                       currentRoute;
     private RouteStep?                       selectedStep;
     private int                              selectedStepRouteId;
+    private HashSet<int>                     dirtyRouteIds  = [];
+    private HashSet<int>                     savingRouteIds = [];
 
     private bool     showProductInfoModal;
     private Product? infoProduct;
@@ -1467,7 +1495,8 @@
     protected override async Task OnInitializedAsync()
     {
         var state = await AuthStateTask;
-        currentUserId = int.Parse(state.User.FindFirst("UserId")?.Value ?? "0");
+        currentUserId  = int.Parse(state.User.FindFirst("UserId")?.Value ?? "0");
+        isTechnologist = state.User.IsInRole("technologist");
 
         var t1 = ProductSvc.GetAllWithRoutesAsync();
         var t2 = OpSvc.GetAllAsync();
@@ -1859,6 +1888,7 @@
             newValue: new { RouteId = currentRoute.Id, RouteName = currentRoute.Name, step.SequenceNum, step.Description });
         await RefreshRouteSteps(currentRoute.Id);
         CloseModals();
+        _ = RecalculatePciInBackgroundAsync(routeProductId);
     }
 
     private async Task SaveEditStep()
@@ -1885,6 +1915,7 @@
             newValue: new { stepToEdit.SequenceNum, stepToEdit.Description, RouteId = editingRouteId });
         await RefreshRouteSteps(editingRouteId);
         CloseModals();
+        _ = RecalculatePciInBackgroundAsync(routeProductId);
     }
 
     private void DeleteStep(int stepId, int routeId)
@@ -1913,6 +1944,7 @@
             routeMetricsCache[routeId] = ComputeMetrics(newSteps);
             var mainRoute = productRoutes.FirstOrDefault(r => r.Status == "published");
             if (mainRoute?.Id == routeId) mainRouteSteps = newSteps;
+            _ = RecalculatePciInBackgroundAsync(routeProductId);
         });
     }
 
@@ -1920,6 +1952,70 @@
     {
         if (selectedStep is null) return;
         DeleteStep(selectedStep.Id, selectedStepRouteId);
+    }
+
+    // Драг уже произошёл на клиенте (карточки физически переставлены в DOM,
+    // см. tnInterop.routeDrag) — здесь только читаем итоговый порядок id'ов
+    // и переносим его в локальный кеш. В БД ничего не пишем: пользователь
+    // может перетащить несколько шагов подряд и сохранить все изменения
+    // разом кнопкой "Сохранить порядок" (см. SaveStepsOrder).
+    private async Task OnStepsDropped(int routeId)
+    {
+        if (!isTechnologist) return;
+
+        var orderedIds = await JS.InvokeAsync<int[]>("tnInterop.routeDrag.getOrder", $"steps-flow-{routeId}");
+        if (orderedIds.Length == 0) return;
+
+        routeStepsCache.TryGetValue(routeId, out var steps);
+        if (steps is null) return;
+
+        var byId    = steps.ToDictionary(s => s.Id);
+        var changed = false;
+        for (var i = 0; i < orderedIds.Length; i++)
+        {
+            if (!byId.TryGetValue(orderedIds[i], out var s)) continue;
+            var newSeq = i + 1;
+            if (s.SequenceNum == newSeq) continue;
+            s.SequenceNum = newSeq;
+            changed = true;
+        }
+        if (!changed) return;
+
+        dirtyRouteIds.Add(routeId);
+        var mainRoute = productRoutes.FirstOrDefault(r => r.Status == "published");
+        if (mainRoute?.Id == routeId) mainRouteSteps = steps.OrderBy(s => s.SequenceNum).ToList();
+    }
+
+    private async Task SaveStepsOrder(int routeId)
+    {
+        routeStepsCache.TryGetValue(routeId, out var steps);
+        if (steps is null) return;
+
+        savingRouteIds.Add(routeId);
+        try
+        {
+            var ordered = steps.OrderBy(s => s.SequenceNum).ToList();
+            foreach (var s in ordered)
+                await StepSvc.UpdateAsync(s);
+
+            await AuditSvc.LogAsync(currentUserId, "Порядок шагов маршрута сохранён",
+                "TechRoute", routeId, newValue: new { RouteId = routeId, Order = ordered.Select(s => s.Id) });
+
+            await RefreshRouteSteps(routeId);
+            dirtyRouteIds.Remove(routeId);
+
+            _ = RecalculatePciInBackgroundAsync(routeProductId);
+        }
+        finally
+        {
+            savingRouteIds.Remove(routeId);
+        }
+    }
+
+    private async Task CancelStepsOrder(int routeId)
+    {
+        await RefreshRouteSteps(routeId);
+        dirtyRouteIds.Remove(routeId);
     }
 
     private async Task RefreshRouteSteps(int routeId)
@@ -2124,6 +2220,10 @@
             }
             var freshMr = await RouteBuildSvc.MineFromEventsAsync(routeProductId);
             if (freshMr.Success) productMinerCache[routeProductId] = freshMr;
+
+            // ManualRebuildAsync уже пересчитал PCI внутри себя — здесь просто
+            // подтягиваем свежие значения LastPci в список маршрутов для UI.
+            productRoutes = await RouteSvc.GetByProductAsync(routeProductId);
         }
         finally
         {
@@ -2190,14 +2290,20 @@
         const double cW = cR - cL;
         const double cH = cB - cT;
 
-        double ToY(double pci) => cT + (1.0 - pci / 100.0) * cH;
-        double ToX(int i) => history.Count > 1
-            ? cL + (double)i / (history.Count - 1) * cW
-            : cL + cW / 2.0;
+        // X считается по реальному времени точки (а не по её порядковому номеру) —
+        // так график остаётся непрерывным и правдиво отражает интервалы между
+        // пересчётами, даже если часть точек идёт кучно, а часть — редко.
+        var minTicks  = history.Min(p => p.Date).Ticks;
+        var maxTicks  = history.Max(p => p.Date).Ticks;
+        var spanTicks = Math.Max(1L, maxTicks - minTicks);
 
-        var pts = vals.Select((v, i) => (x: ToX(i), y: ToY(v), v, p: history[i])).ToList();
+        double ToY(double pci) => cT + (1.0 - pci / 100.0) * cH;
+        double ToX(DateTime d) => cL + (double)(d.Ticks - minTicks) / spanTicks * cW;
+
+        var pts = vals.Select((v, i) => (x: ToX(history[i].Date), y: ToY(v), v, p: history[i])).ToList();
 
         var sb = new System.Text.StringBuilder();
+        sb.Append("<div class=\"mk-pci-chart-wrap\">");
         sb.Append($"<svg viewBox=\"0 0 {W} {H}\" style=\"width:100%;height:210px;display:block;\" font-family=\"system-ui,sans-serif\">");
 
         sb.Append($"<rect x=\"{cL}\" y=\"{cT}\" width=\"{cW}\" height=\"{cH}\" fill=\"#f8fafc\" rx=\"3\" stroke=\"#e2e8f0\"/>");
@@ -2215,22 +2321,47 @@
         sb.Append($"<line x1=\"{cL}\" y1=\"{gy70:F0}\" x2=\"{cR}\" y2=\"{gy70:F0}\" stroke=\"#f59e0b\" stroke-width=\"1.5\" stroke-dasharray=\"5,3\"/>");
         sb.Append($"<text x=\"{cR + 3}\" y=\"{gy70 + 4:F0}\" font-size=\"9\" fill=\"#f59e0b\" font-weight=\"600\">70%</text>");
 
-        var areaPts = $"{cL},{cB:F0} " + string.Join(" ", pts.Select(p => $"{p.x:F0},{p.y:F0}")) + $" {cR},{cB:F0}";
+        var areaPts = $"{pts[0].x:F0},{cB:F0} " + string.Join(" ", pts.Select(p => $"{p.x:F0},{p.y:F0}")) + $" {pts[^1].x:F0},{cB:F0}";
         sb.Append($"<polygon points=\"{areaPts}\" fill=\"#2563eb\" opacity=\"0.07\"/>");
 
         var linePts = string.Join(" ", pts.Select(p => $"{p.x:F0},{p.y:F0}"));
         sb.Append($"<polyline points=\"{linePts}\" fill=\"none\" stroke=\"#2563eb\" stroke-width=\"2.5\" stroke-linejoin=\"round\" stroke-linecap=\"round\"/>");
 
+        // Видимые маркеры рисуем только пока точек немного — иначе они сливаются
+        // в кашу. Прозрачные "хиты" побольше есть у каждой точки всегда — по ним
+        // работает подсказка с датой и значением при наведении мышью.
+        var showDots = pts.Count <= 40;
         foreach (var pt in pts)
         {
-            var col = pt.p.Status switch { "Conformant" => "#16a34a", "NeedsReview" => "#f59e0b", "NonConformant" => "#dc2626", _ => "#94a3b8" };
-            double lblY = Math.Max(cT + 10, pt.y - 7);
-            sb.Append($"<text x=\"{pt.x:F0}\" y=\"{lblY:F0}\" text-anchor=\"middle\" font-size=\"9\" fill=\"#374151\" font-weight=\"500\">{pt.v:N0}%</text>");
-            sb.Append($"<circle cx=\"{pt.x:F0}\" cy=\"{pt.y:F0}\" r=\"5\" fill=\"{col}\" stroke=\"white\" stroke-width=\"2\"/>");
-            sb.Append($"<text x=\"{pt.x:F0}\" y=\"{cB + 14}\" text-anchor=\"middle\" font-size=\"9\" fill=\"#64748b\">{pt.p.Date.ToLocalTime():dd.MM}</text>");
+            if (showDots)
+            {
+                var col = pt.p.Status switch { "Conformant" => "#16a34a", "NeedsReview" => "#f59e0b", "NonConformant" => "#dc2626", _ => "#94a3b8" };
+                sb.Append($"<circle cx=\"{pt.x:F0}\" cy=\"{pt.y:F0}\" r=\"3\" fill=\"{col}\" stroke=\"white\" stroke-width=\"1.5\" pointer-events=\"none\"/>");
+            }
+
+            var tip = $"{pt.p.Date.ToLocalTime():dd.MM.yyyy HH:mm} — {pt.v.ToString("N1", System.Globalization.CultureInfo.InvariantCulture)}%";
+            sb.Append($"<circle cx=\"{pt.x:F0}\" cy=\"{pt.y:F0}\" r=\"9\" fill=\"transparent\" style=\"cursor:default;\" " +
+                       $"onmouseenter=\"tnInterop.showChartTooltip(event,'pci-tooltip','{tip}')\" " +
+                       $"onmousemove=\"tnInterop.moveChartTooltip(event,'pci-tooltip')\" " +
+                       $"onmouseleave=\"tnInterop.hideChartTooltip('pci-tooltip')\"></circle>");
+        }
+
+        // По оси X подписываем не каждую точку, а месяцы (по локальному времени
+        // первой точки в каждом месяце) — история за год умещается читаемо.
+        var ruCulture = System.Globalization.CultureInfo.GetCultureInfo("ru-RU");
+        var monthTicks = pts
+            .Select(p => (p.x, Local: p.p.Date.ToLocalTime()))
+            .GroupBy(p => (p.Local.Year, p.Local.Month))
+            .Select(g => g.First());
+        foreach (var (x, local) in monthTicks)
+        {
+            var label = ruCulture.DateTimeFormat.AbbreviatedMonthNames[local.Month - 1];
+            sb.Append($"<text x=\"{x:F0}\" y=\"{cB + 14}\" text-anchor=\"middle\" font-size=\"9\" fill=\"#64748b\">{label}</text>");
         }
 
         sb.Append("</svg>");
+        sb.Append("<div class=\"mk-pci-tooltip\" id=\"pci-tooltip\"></div>");
+        sb.Append("</div>");
         return sb.ToString();
     }
 

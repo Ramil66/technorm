@@ -231,7 +231,7 @@ public class ConformanceCheckingService(
             ResourceIssues            = resResult.Issues,
         };
 
-        await SaveConformanceMetricsAsync(db, result, ct);
+        await SaveConformanceMetricsAsync(db, result, route.LastPci, ct);
         await UpdateRoutePciStatusAsync(db, route.Id, result, ct);
 
         return result;
@@ -451,8 +451,15 @@ public class ConformanceCheckingService(
     }
 
     private static async Task SaveConformanceMetricsAsync(
-        TechNormDbContext db, ConformanceCheckResult result, CancellationToken ct)
+        TechNormDbContext db, ConformanceCheckResult result, decimal? previousPci, CancellationToken ct)
     {
+        // Пересчёт запускается при каждом открытии изделия (не по расписанию),
+        // поэтому если значение PCI не изменилось с прошлого раза — не пишем
+        // новую точку в историю, иначе график "Динамика PCI" накапливает
+        // одинаковые точки при каждом открытии окна аналитики/изделия.
+        if (previousPci.HasValue && previousPci.Value == result.ProcessConformanceIndex)
+            return;
+
         var metricsObj = new
         {
             type                      = "ConformanceChecking",

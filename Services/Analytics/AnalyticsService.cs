@@ -45,8 +45,11 @@ public class AnalyticsService(IDbContextFactory<TechNormDbContext> factory) : IA
         var matNormCount    = allSteps.SelectMany(s => s.MaterialNorms).Count();
         var lastRouteUpdate = routes.Select(r => (DateTime?)r.UpdatedAt).Max();
 
+        // Ограничиваем окно годом, иначе при частых пересчётах график
+        // "Динамика PCI" накапливает слишком много точек и становится нечитаемым.
+        var pciHistorySince = DateTime.UtcNow.AddYears(-1);
         var histories = await db.CalculationHistories
-            .Where(h => h.ProductId == productId)
+            .Where(h => h.ProductId == productId && h.CalculatedAt >= pciHistorySince)
             .OrderBy(h => h.CalculatedAt)
             .ToListAsync();
 
@@ -57,8 +60,13 @@ public class AnalyticsService(IDbContextFactory<TechNormDbContext> factory) : IA
             .Select(m => m!)
             .ToList();
 
+        // В один день пересчёт может отработать много раз (перезаходы, ручные
+        // сохранения и т.д.) — на графике оставляем одну точку на календарный
+        // день (по локальному времени), берём последнее значение за день.
         var pciHistory = conformanceHistories
             .Where(m => m.CalculatedAt != default)
+            .GroupBy(m => m.CalculatedAt.ToLocalTime().Date)
+            .Select(g => g.OrderByDescending(m => m.CalculatedAt).First())
             .OrderBy(m => m.CalculatedAt)
             .Select(m => new PciHistoryPoint
             {
